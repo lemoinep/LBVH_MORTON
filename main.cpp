@@ -225,7 +225,7 @@ __global__ void rayTracingKernel(lbvh::bvh_device<T, U> bvh_dev, Ray ray, float4
 
 
 template <typename T, typename U>
-__global__ void rayTracingKernel(lbvh::bvh_device<T, U> bvh_dev, Ray* rays, HitRay* d_HitRays, int numRays) {
+__global__ void rayTracingKernel2(lbvh::bvh_device<T, U> bvh_dev, Ray* rays, HitRay* d_HitRays, int numRays) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= numRays) return;
 
@@ -250,7 +250,6 @@ __global__ void rayTracingKernel(lbvh::bvh_device<T, U> bvh_dev, Ray* rays, HitR
 
         printf("Ray %d: Nearest object index: %u\n", idx, nest.first);
         printf("Ray %d: Distance to nearest object: %f\n", idx, nest.second);
-
         printf("Ray %d: v1=%f %f %f\n", idx, hit_triangle.v1.x, hit_triangle.v1.y, hit_triangle.v1.z);
         printf("Ray %d: v2=%f %f %f\n", idx, hit_triangle.v2.x, hit_triangle.v2.y, hit_triangle.v2.z);
         printf("Ray %d: v3=%f %f %f\n", idx, hit_triangle.v3.x, hit_triangle.v3.y, hit_triangle.v3.z);
@@ -259,16 +258,18 @@ __global__ void rayTracingKernel(lbvh::bvh_device<T, U> bvh_dev, Ray* rays, HitR
         float t;
         if (rayTriangleIntersect(ray, hit_triangle, t)) {
             float4 hit_point = ray.origin + ray.direction * t;
-            //results[idx] = hit_point;
             printf("Ray %d hit triangle %d at point (%f, %f, %f)\n", 
                    idx, nest.first, hit_point.x, hit_point.y, hit_point.z);
+            printf("t=%f\n",t);
+            d_HitRays[idx].closestTriangle = nest.first;
+            d_HitRays[idx].closestT = t; //distance
+            d_HitRays[idx].closestIntersectionPoint=make_float3( hit_point.x, hit_point.y, hit_point.z);
+            d_HitRays[idx].closesIntersectionId = hit_triangle.id;
         } else {
-            //results[idx] = make_float4(INFINITY, INFINITY, INFINITY, INFINITY);
             printf("Ray %d: Nearest object found but not intersected by ray\n", idx);
         }
     } else {
         // No items found
-        //results[idx] = make_float4(INFINITY, INFINITY, INFINITY, INFINITY);
         printf("Ray %d did not hit any triangle\n", idx);
     }
 }
@@ -344,25 +345,45 @@ void Test001()
     //hipDeviceSynchronize();
 
 
-    int nbRay=1;
+    std::cout<<"= 1 Ray =========\n";
     
     float4* d_result;
     hipMalloc(&d_result, sizeof(float4));
     Ray ray1;
     ray1.origin = make_float4(5.0f, 0.0f, 6.25f, 1.0f);
     ray1.direction = make_float4(0.0f, 0.0f, -1.0f, 0.0f);
-
-
-    HitRay* d_HitRays;
-    hipMalloc(&d_HitRays, nbRay*sizeof(HitRay));
-
     rayTracingKernel<float, Triangle><<<1, 1>>>(bvh_dev,ray1,d_result);
     hipDeviceSynchronize();
 
     float4 h_result;
     hipMemcpy(&h_result, d_result, sizeof(float4), hipMemcpyDeviceToHost);
-
     hipFree(d_result);
+
+
+    std::cout<<"= n Ray =========\n";
+    int numRays=2;
+    thrust::host_vector<Ray> h_rays(numRays);
+    h_rays[0].origin = make_float4(5.0f, 0.0f, 6.25f, 1.0f);
+    h_rays[0].direction = make_float4(0.0f, 0.0f, -1.0f, 0.0f);
+
+    h_rays[1].origin = make_float4(0.0f, 0.0f, 10.0f, 1.0f);
+    h_rays[1].direction = make_float4(0.0f, 0.0f, -1.0f, 0.0f);
+
+
+    Ray* d_rays;
+    hipMalloc(&d_rays, numRays * sizeof(Ray));
+    hipMemcpy(d_rays, h_rays.data(), numRays * sizeof(Ray), hipMemcpyHostToDevice);
+
+
+    HitRay* d_hitRays;
+    hipMalloc(&d_hitRays, numRays*sizeof(HitRay)); 
+
+    int threadsPerBlock = 256;
+    int blocksPerGrid = (numRays + threadsPerBlock - 1) / threadsPerBlock;
+    rayTracingKernel2<float, Triangle><<<blocksPerGrid, threadsPerBlock>>>(bvh_dev,d_rays,d_hitRays,numRays);
+    hipDeviceSynchronize();
+
+
    
 }
 
