@@ -182,6 +182,8 @@ __global__ void process_single_point_new(lbvh::bvh_device<T, U> bvh_dev, float4 
 template <typename T, typename U>
 __global__ void rayTracingKernel(lbvh::bvh_device<T, U> bvh_dev, Ray ray, float4* result) {
     const auto calc = distance_calculator();
+
+    bool isView=true;
     
     // Point along the ray at a unit distance from the origin
     float4 pos = ray.origin + ray.direction;
@@ -192,42 +194,46 @@ __global__ void rayTracingKernel(lbvh::bvh_device<T, U> bvh_dev, Ray ray, float4
     if (nest.first != 0xFFFFFFFF) {
         // An object has been found
         const auto& hit_triangle = bvh_dev.objects[nest.first];
-
-        printf("Nearest object index: %u\n", nest.first);
-        printf("Distance to nearest object: %f\n", nest.second);
-
-        printf("v1=%f %f %f\n",hit_triangle.v1.x,hit_triangle.v1.y,hit_triangle.v1.z);
-        printf("v2=%f %f %f\n",hit_triangle.v2.x,hit_triangle.v2.y,hit_triangle.v2.z);
-        printf("v3=%f %f %f\n",hit_triangle.v3.x,hit_triangle.v3.y,hit_triangle.v3.z);
+        if (isView)
+        {
+            printf("Nearest object index: %u\n",nest.first);
+            printf("Distance to nearest object: %f\n",nest.second);
+            printf("v1=%f %f %f\n",hit_triangle.v1.x, hit_triangle.v1.y, hit_triangle.v1.z);
+            printf("v2=%f %f %f\n",hit_triangle.v2.x, hit_triangle.v2.y, hit_triangle.v2.z);
+            printf("v3=%f %f %f\n",hit_triangle.v3.x, hit_triangle.v3.y, hit_triangle.v3.z);
+        }
 
         // Calculate the intersection point
         float t;
         if (rayTriangleIntersect(ray, hit_triangle, t)) {
             float4 hit_point = ray.origin + ray.direction * t;
             *result = hit_point;
-            printf("Ray hit triangle %d at point (%f, %f, %f)\n", 
-                   nest.first, hit_point.x, hit_point.y, hit_point.z);
-            printf("t=%f\n",t);
+            if (isView)
+            {
+                printf("Ray hit triangle %d at point (%f, %f, %f)\n", nest.first, hit_point.x, hit_point.y, hit_point.z);
+                printf("t=%f\n",t);
+            }
         } else {
             *result = make_float4(INFINITY, INFINITY, INFINITY, INFINITY);
-            printf("Nearest object found but not intersected by ray\n");
+            if (isView) printf("Nearest object found but not intersected by ray\n");
         }
         
         
     } else {
         // No items found
         *result = make_float4(INFINITY, INFINITY, INFINITY, INFINITY);
-        printf("Ray did not hit any triangle\n");
+        if (isView) printf("Ray did not hit any triangle\n");
     }
-    
 }
 
 
 
 template <typename T, typename U>
-__global__ void rayTracingKernel2(lbvh::bvh_device<T, U> bvh_dev, Ray* rays, HitRay* d_HitRays, int numRays) {
+__global__ void rayTracingKernel(lbvh::bvh_device<T, U> bvh_dev, Ray* rays, HitRay* d_HitRays, int numRays) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= numRays) return;
+
+    bool isView=true; isView=false;
 
     Ray ray = rays[idx];
     const auto calc = distance_calculator();
@@ -248,29 +254,34 @@ __global__ void rayTracingKernel2(lbvh::bvh_device<T, U> bvh_dev, Ray* rays, Hit
         // An object has been found
         const auto& hit_triangle = bvh_dev.objects[nest.first];
 
-        printf("Ray %d: Nearest object index: %u\n", idx, nest.first);
-        printf("Ray %d: Distance to nearest object: %f\n", idx, nest.second);
-        printf("Ray %d: v1=%f %f %f\n", idx, hit_triangle.v1.x, hit_triangle.v1.y, hit_triangle.v1.z);
-        printf("Ray %d: v2=%f %f %f\n", idx, hit_triangle.v2.x, hit_triangle.v2.y, hit_triangle.v2.z);
-        printf("Ray %d: v3=%f %f %f\n", idx, hit_triangle.v3.x, hit_triangle.v3.y, hit_triangle.v3.z);
+        if (isView)
+        {
+            printf("Ray %d: Nearest object index: %u\n", idx, nest.first);
+            printf("Ray %d: Distance to nearest object: %f\n", idx, nest.second);
+            printf("Ray %d: v1=%f %f %f\n", idx, hit_triangle.v1.x, hit_triangle.v1.y, hit_triangle.v1.z);
+            printf("Ray %d: v2=%f %f %f\n", idx, hit_triangle.v2.x, hit_triangle.v2.y, hit_triangle.v2.z);
+            printf("Ray %d: v3=%f %f %f\n", idx, hit_triangle.v3.x, hit_triangle.v3.y, hit_triangle.v3.z);
+        }
 
         // Calculate the intersection point
         float t;
         if (rayTriangleIntersect(ray, hit_triangle, t)) {
             float4 hit_point = ray.origin + ray.direction * t;
-            printf("Ray %d hit triangle %d at point (%f, %f, %f)\n", 
-                   idx, nest.first, hit_point.x, hit_point.y, hit_point.z);
-            printf("t=%f\n",t);
+            if (isView)
+            {
+                printf("Ray %d hit triangle %d at point (%f, %f, %f)\n", idx, nest.first, hit_point.x, hit_point.y, hit_point.z);
+                printf("distance:%f\n",t);
+            }
             d_HitRays[idx].closestTriangle = nest.first;
             d_HitRays[idx].closestT = t; //distance
             d_HitRays[idx].closestIntersectionPoint=make_float3( hit_point.x, hit_point.y, hit_point.z);
             d_HitRays[idx].closesIntersectionId = hit_triangle.id;
         } else {
-            printf("Ray %d: Nearest object found but not intersected by ray\n", idx);
+            if (isView) printf("Ray %d: Nearest object found but not intersected by ray\n", idx);
         }
     } else {
         // No items found
-        printf("Ray %d did not hit any triangle\n", idx);
+       if (isView) printf("Ray %d did not hit any triangle\n", idx);
     }
 }
 
@@ -339,14 +350,10 @@ void Test001()
     lbvh::bvh<float, Triangle, aabb_getter> bvh(triangles.begin(), triangles.end(), true);
     const auto bvh_dev = bvh.get_device_repr();
 
-
     //float4 query_point = make_float4(5.0,0.0,2.0,1.0f);
     //process_single_point_new<float, Triangle><<<1, 1>>>(bvh_dev, query_point);
     //hipDeviceSynchronize();
 
-
-    std::cout<<"= 1 Ray =========\n";
-    
     float4* d_result;
     hipMalloc(&d_result, sizeof(float4));
     Ray ray1;
@@ -354,13 +361,30 @@ void Test001()
     ray1.direction = make_float4(0.0f, 0.0f, -1.0f, 0.0f);
     rayTracingKernel<float, Triangle><<<1, 1>>>(bvh_dev,ray1,d_result);
     hipDeviceSynchronize();
-
     float4 h_result;
     hipMemcpy(&h_result, d_result, sizeof(float4), hipMemcpyDeviceToHost);
     hipFree(d_result);
+}
 
 
-    std::cout<<"= n Ray =========\n";
+void Test002()
+{
+
+    std::chrono::steady_clock::time_point t_begin_0,t_begin_1;
+    std::chrono::steady_clock::time_point t_end_0,t_end_1;
+    long int t_laps;
+
+    std::vector<Triangle> triangles;
+    // Load object
+    loadOBJTriangle("Test.obj",triangles,1001);
+    
+    // Building the LBVH
+    t_begin_0 = std::chrono::steady_clock::now();
+    lbvh::bvh<float, Triangle, aabb_getter> bvh(triangles.begin(), triangles.end(), true);
+    const auto bvh_dev = bvh.get_device_repr();
+    t_end_0 = std::chrono::steady_clock::now();
+
+    // Building rays
     int numRays=2;
     thrust::host_vector<Ray> h_rays(numRays);
     h_rays[0].origin = make_float4(5.0f, 0.0f, 6.25f, 1.0f);
@@ -369,28 +393,58 @@ void Test001()
     h_rays[1].origin = make_float4(0.0f, 0.0f, 10.0f, 1.0f);
     h_rays[1].direction = make_float4(0.0f, 0.0f, -1.0f, 0.0f);
 
-
     Ray* d_rays;
     hipMalloc(&d_rays, numRays * sizeof(Ray));
     hipMemcpy(d_rays, h_rays.data(), numRays * sizeof(Ray), hipMemcpyHostToDevice);
 
-
     HitRay* d_hitRays;
     hipMalloc(&d_hitRays, numRays*sizeof(HitRay)); 
 
+    t_begin_1 = std::chrono::steady_clock::now();
     int threadsPerBlock = 256;
     int blocksPerGrid = (numRays + threadsPerBlock - 1) / threadsPerBlock;
-    rayTracingKernel2<float, Triangle><<<blocksPerGrid, threadsPerBlock>>>(bvh_dev,d_rays,d_hitRays,numRays);
-    hipDeviceSynchronize();
+    rayTracingKernel<float, Triangle><<<blocksPerGrid, threadsPerBlock>>>(bvh_dev,d_rays,d_hitRays,numRays);
+    hipDeviceSynchronize();  
+    t_end_1 = std::chrono::steady_clock::now();
+
+    thrust::host_vector<HitRay> h_hitRays(numRays);
+    hipMemcpy(h_hitRays.data(),d_hitRays, numRays * sizeof(HitRay), hipMemcpyDeviceToHost);
+
+    std::cout<<"\n";
+    std::cout<<"Debriefing\n";
+    std::cout<<"\n";
+    for (int i=0;i<numRays;i++)
+    {
+        if (h_hitRays[i].closesIntersectionId!=-1)
+        {
+            std::cout<<"["<<i<<"] "<<h_hitRays[i].closestTriangle<<" "
+            <<h_hitRays[i].closestT<<" "
+            <<h_hitRays[i].closesIntersectionId
+            <<" <"<<h_hitRays[i].closestIntersectionPoint.x<<","<<h_hitRays[i].closestIntersectionPoint.y<<","<<h_hitRays[i].closestIntersectionPoint.z<<">"
+            <<"\n";
+        }
+
+    }
 
 
-   
+    t_laps= std::chrono::duration_cast<std::chrono::microseconds>(t_end_0 - t_begin_0).count();
+    std::cout << "[INFO]: Elapsed microseconds inside LBVH + transfer triangle : "<<t_laps<< " us\n";
+
+    t_laps= std::chrono::duration_cast<std::chrono::microseconds>(t_end_1 - t_begin_1).count();
+    std::cout << "[INFO]: Elapsed microseconds inside Ray Tracing : "<<t_laps<< " us\n";
+
+
+    hipFree(d_rays);
+    hipFree(d_hitRays);
+    h_rays.clear();
+    h_hitRays.clear();
+
 }
 
 
-
 int main(){
-    Test001();
+    //Test001();
+    Test002();
     std::cout << "[INFO]: WELL DONE :-) FINISHED !"<<"\n";
     return 0;
 }
