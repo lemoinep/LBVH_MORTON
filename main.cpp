@@ -57,10 +57,6 @@
 #include <random>
  
 
-//bvh.cuh
-
-//https://github.com/ToruNiina/lbvh
-
 
 
 struct Ray {
