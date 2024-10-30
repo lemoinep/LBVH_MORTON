@@ -71,10 +71,10 @@ struct Triangle {
 };
 
 struct HitRay {
-    float closestT;
-    int closestTriangle;
-    int closesIntersectionId;
-    float3 closestIntersectionPoint;
+    float distanceResults; 
+    int hitResults;  
+    int idResults; 
+    float3 intersectionPoint; 
 };
 
 
@@ -245,10 +245,10 @@ __global__ void rayTracingKernel(lbvh::bvh_device<T, U> bvh_dev, Ray* rays, HitR
     const auto nest = lbvh::query_device(bvh_dev, lbvh::nearest(pos), calc);
 
     // Initialization of results
-    d_HitRays[idx].closestTriangle = -1;
-    d_HitRays[idx].closestT = INFINITY; //distance
-    d_HitRays[idx].closestIntersectionPoint=make_float3(INFINITY, INFINITY, INFINITY);
-    d_HitRays[idx].closesIntersectionId = -1;
+    d_HitRays[idx].hitResults = -1;
+    d_HitRays[idx].distanceResults = INFINITY; //distance
+    d_HitRays[idx].intersectionPoint=make_float3(INFINITY, INFINITY, INFINITY);
+    d_HitRays[idx].idResults = -1;
     
     if (nest.first != 0xFFFFFFFF) {
         // An object has been found
@@ -272,10 +272,10 @@ __global__ void rayTracingKernel(lbvh::bvh_device<T, U> bvh_dev, Ray* rays, HitR
                 printf("Ray %d hit triangle %d at point (%f, %f, %f)\n", idx, nest.first, hit_point.x, hit_point.y, hit_point.z);
                 printf("distance:%f\n",t);
             }
-            d_HitRays[idx].closestTriangle = nest.first;
-            d_HitRays[idx].closestT = t; //distance
-            d_HitRays[idx].closestIntersectionPoint=make_float3( hit_point.x, hit_point.y, hit_point.z);
-            d_HitRays[idx].closesIntersectionId = hit_triangle.id;
+            d_HitRays[idx].hitResults = nest.first;
+            d_HitRays[idx].distanceResults = t; //distance
+            d_HitRays[idx].intersectionPoint=make_float3( hit_point.x, hit_point.y, hit_point.z);
+            d_HitRays[idx].idResults = hit_triangle.id;
         } else {
             if (isView) printf("Ray %d: Nearest object found but not intersected by ray\n", idx);
         }
@@ -415,12 +415,12 @@ void Test002()
     std::cout<<"\n";
     for (int i=0;i<numRays;i++)
     {
-        if (h_hitRays[i].closesIntersectionId!=-1)
+        if (h_hitRays[i].idResults!=-1)
         {
-            std::cout<<"["<<i<<"] "<<h_hitRays[i].closestTriangle<<" "
-            <<h_hitRays[i].closestT<<" "
-            <<h_hitRays[i].closesIntersectionId
-            <<" <"<<h_hitRays[i].closestIntersectionPoint.x<<","<<h_hitRays[i].closestIntersectionPoint.y<<","<<h_hitRays[i].closestIntersectionPoint.z<<">"
+            std::cout<<"["<<i<<"] "<<h_hitRays[i].hitResults<<" "
+            <<h_hitRays[i].distanceResults<<" "
+            <<h_hitRays[i].idResults
+            <<" <"<<h_hitRays[i].intersectionPoint.x<<","<<h_hitRays[i].intersectionPoint.y<<","<<h_hitRays[i].intersectionPoint.z<<">"
             <<"\n";
         }
 
