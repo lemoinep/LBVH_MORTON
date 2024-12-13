@@ -1586,7 +1586,7 @@ rayTracingKernelExploration002Old(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
 }
 
 template <typename T, typename U>
-__global__ void rayTracingKernelExploration002(lbvh::bvh_device<T, U> bvh_dev,
+__global__ void rayTracingKernelExploration002B(lbvh::bvh_device<T, U> bvh_dev,
                                                Ray *rays, HitRay *d_HitRays,
                                                int numRays) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1715,6 +1715,108 @@ __global__ void rayTracingKernelExploration002(lbvh::bvh_device<T, U> bvh_dev,
     } // END FOR
   }
 }
+
+
+
+template <typename T, typename U>
+    __global__ void rayTracingKernelExploration002(lbvh::bvh_device<T, U> bvh_dev,
+                                              Ray *rays, HitRay *d_HitRays,
+                                              int numRays) {
+        int idx = blockIdx.x * blockDim.x + threadIdx.x;
+        if (idx >= numRays)
+            return;
+
+        // Load ray data into registers for faster access
+        Ray ray = rays[idx];
+
+        // Initialize hit results in registers to reduce global memory writes
+        HitRay hitResult;
+        hitResult.hitResults = -1;
+        hitResult.distanceResults = INFINITY;
+        hitResult.intersectionPoint = make_float3(INFINITY, INFINITY, INFINITY);
+        hitResult.idResults = -1;
+
+        constexpr float epsilon = 0.001f;
+        constexpr float epsilonC = 0.01f;
+        constexpr int maxIterations = 50;
+
+        // Precompute directions array in shared memory for better performance
+        __shared__ float4 directions[14];
+        if (threadIdx.x < 14) {
+            directions[threadIdx.x] = make_float4(
+                (threadIdx.x % 2 == 0 ? 1.0f : -1.0f) * ((threadIdx.x / 6) % 2),
+                (threadIdx.x % 6 == 0 ? -1.0f : (threadIdx.x / 2) % 2),
+                (threadIdx.x % 3 == 0 ? -1.0f : (threadIdx.x / 3) % 2),
+                0.0f);
+        }
+        __syncthreads();
+
+        // Step 1: Initial exploration
+        for (int i = 0; i < 14; ++i) {
+            float4 currentPosition = ray.origin + directions[i] * epsilonC;
+            const auto nearestTriangleIndex = lbvh::query_device(
+                bvh_dev, lbvh::nearest(currentPosition), distance_calculator());
+
+            if (nearestTriangleIndex.first != 0xFFFFFFFF) {
+                const Triangle &hitTriangle = bvh_dev.objects[nearestTriangleIndex.first];
+                if (pointInTriangle2(currentPosition, hitTriangle, 0.0001f)) {
+                    float t;
+                    if (rayTriangleIntersect(ray, hitTriangle, t)) {
+                        float4 hit_point = ray.origin + ray.direction * t;
+                        hitResult.hitResults = nearestTriangleIndex.first;
+                        hitResult.distanceResults = t;
+                        hitResult.intersectionPoint = make_float3(hit_point.x, hit_point.y, hit_point.z);
+                        hitResult.idResults = hitTriangle.id;
+                        d_HitRays[idx] = hitResult;
+                        return; // Exit early if intersection found
+                    }
+                }
+            }
+        }
+
+        // Step 2: Refined search
+        float delta = -epsilon;
+        float4 currentPosition, currentPositionLast;
+        for (int iteration = 0; iteration < maxIterations; ++iteration) {
+            currentPositionLast = currentPosition;
+            currentPosition = ray.origin + ray.direction * delta;
+
+            if (currentPosition == currentPositionLast) {
+                delta += epsilon;
+                currentPosition = ray.origin + ray.direction * delta;
+            }
+
+            auto nearestTriangleIndex = lbvh::query_device(
+                bvh_dev, lbvh::nearest(currentPosition), distance_calculator());
+            if (nearestTriangleIndex.first != 0xFFFFFFFF) {
+                const Triangle &hitTriangle = bvh_dev.objects[nearestTriangleIndex.first];
+                float4 triangleCenter = (hitTriangle.v1 + hitTriangle.v2 + hitTriangle.v3) / 3.0f;
+                float4 directionToTriangle = triangleCenter - ray.origin;
+
+                float angleToTriangle = fabs(angleScalar(directionToTriangle, ray.direction));
+                float distanceToTriangle = length(directionToTriangle);
+
+                float t;
+                if (rayTriangleIntersect(ray, hitTriangle, t)) {
+                    float4 hit_point = ray.origin + ray.direction * t;
+                    hitResult.hitResults = nearestTriangleIndex.first;
+                    hitResult.distanceResults = length(ray.origin - hit_point);
+                    hitResult.intersectionPoint = make_float3(hit_point.x, hit_point.y, hit_point.z);
+                    hitResult.idResults = hitTriangle.id;
+                    d_HitRays[idx] = hitResult;
+                    return;
+                }
+
+                delta += (angleToTriangle > 0.2f) ? distanceToTriangle * 0.75f + epsilon : epsilon;
+            } else {
+                delta += epsilon;
+            }
+        }
+
+        // Write final result to global memory
+        d_HitRays[idx] = hitResult;
+    }
+
 
 __host__ __device__ lbvh::aabb<float> calculateRayBoundingBox(const Ray &ray,
                                                               float delta) {
@@ -2310,17 +2412,17 @@ void Test002(int mode) {
   thrust::host_vector<Ray> h_rays(numRays);
   // h_rays[0].origin = make_float4(0.0f, 0.0f, 1.00001f, 1.0f);
 
-  // h_rays[0].origin = make_float4(1.0f, 1.0f, 1.0, 1.0f);
+  //h_rays[0].origin = make_float4(1.0f, 1.0f, 1.0, 1.0f);
 
   // h_rays[0].origin = make_float4(4.5f, 0.4f, 0.5, 1.0f);
-  h_rays[0].origin = make_float4(0.8f, 0.7f, 0.7f, 1.0f);
+  //h_rays[0].origin = make_float4(0.8f, 0.7f, 0.7f, 1.0f);
 
-  // h_rays[0].origin = make_float4(0.5f, 0.5f, 0.5, 1.0f);
+  h_rays[0].origin = make_float4(0.5f, 0.5f, 0.5, 1.0f);
 
-  // h_rays[0].origin = make_float4(0.9f, 0.9f, 0.9, 1.0f);
+  //h_rays[0].origin = make_float4(0.9f, 0.9f, 0.9, 1.0f);
   // h_rays[0].origin = make_float4(0.9f, 0.9f, 1.0, 1.0f);
 
-  // h_rays[0].origin = make_float4(1.5f, 0.0f, 0.0, 1.0f);
+  h_rays[0].origin = make_float4(1.5f, 0.0f, 0.0, 1.0f);
   h_rays[0].direction = make_float4(1.0f, 0.0f, 0.0f, 0.0f);
   normalizeRayDirection(h_rays[0]);
 
