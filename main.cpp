@@ -1140,8 +1140,10 @@ rayTracingKernelExplorationOptimized(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
   Triangle closestTriangle;
   int closestTriangleId = -1;
   int step = 1;
+  float t;
 
   if (step == 1) {
+    step = 2;
     const float epsilonC = 0.01f;
     for (int i = 0; i < 14; ++i) {
       float4 currentPosition = ray.origin + directions[i] * epsilonC;
@@ -1151,32 +1153,38 @@ rayTracingKernelExplorationOptimized(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
       if (nearestTriangleIndex.first != 0xFFFFFFFF) {
         const Triangle &hitTriangle =
             bvh_dev.objects[nearestTriangleIndex.first];
-        if (pointInTriangle2(currentPosition, hitTriangle, 0.0001f)) {
-          float t;
+        if (pointInTriangle2(currentPosition, hitTriangle, 0.001f)) {
+
+          printf("in step1-level1\n");
+
           rayTriangleIntersect(rays[idx], hitTriangle, t);
           {
+            printf("in step1-level2\n");
             float4 hit_point = ray.origin + ray.direction * t;
             d_HitRays[idx].hitResults = nearestTriangleIndex.first;
             d_HitRays[idx].distanceResults = t; // distance
             d_HitRays[idx].intersectionPoint =
                 make_float3(hit_point.x, hit_point.y, hit_point.z);
             d_HitRays[idx].idResults = hitTriangle.id;
+            step = -1;
           }
           break; // Exit the loop once we find a valid intersection
         }
       }
     }
-    step = 2;
+    
   }
 
+  __syncthreads();
+
   if (step == 2) {
+    printf("in step2-level1\n");
     float dp = 0.0f;
     float angleToTriangle = INFINITY;
     float distanceToTriangle = 0.0f;
     float halfOpeningAngle = INFINITY;
     float4 currentPosition;
     float4 currentPositionLast = currentPosition;
-    float t;
     for (int iteration = 0; iteration < maxIterations; ++iteration) {
       currentPositionLast = currentPosition;
       currentPosition = ray.origin + ray.direction * delta;
@@ -1420,7 +1428,7 @@ void Test002(int mode) {
   thrust::host_vector<Ray> h_rays(numRays);
   // h_rays[0].origin = make_float4(0.0f, 0.0f, 1.00001f, 1.0f);
 
-  // h_rays[0].origin = make_float4(1.0f, 1.0f, 1.0, 1.0f);
+  h_rays[0].origin = make_float4(1.0f, 1.0f, 1.0, 1.0f);
 
   // h_rays[0].origin = make_float4(4.5f, 0.4f, 0.5, 1.0f);
   // h_rays[0].origin = make_float4(0.8f, 0.7f, 0.7f, 1.0f);
@@ -1430,7 +1438,7 @@ void Test002(int mode) {
   // h_rays[0].origin = make_float4(0.9f, 0.9f, 0.9, 1.0f);
   // h_rays[0].origin = make_float4(0.9f, 0.9f, 1.0, 1.0f);
 
-  h_rays[0].origin = make_float4(1.5f, 0.0f, 0.0, 1.0f);
+  //h_rays[0].origin = make_float4(1.5f, 0.0f, 0.0, 1.0f);
   h_rays[0].direction = make_float4(1.0f, 0.0f, 0.0f, 0.0f);
   normalizeRayDirection(h_rays[0]);
 
@@ -1538,7 +1546,7 @@ void Test002(int mode) {
 int main() {
   std::cout << "\n";
   // std::cout << "[INFO]: Methode 1\n"; Test002(1);
-  // std::cout << "[INFO]: Methode 2\n"; Test002(2); std::cout << "\n";
+  //std::cout << "[INFO]: Methode 2\n"; Test002(2); std::cout << "\n";
   std::cout << "[INFO]: Methode 2\n";
   Test002(3);
   std::cout << "\n";
