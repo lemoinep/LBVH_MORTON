@@ -95,56 +95,6 @@ __host__ __device__ float length(const float4 &v) {
   return sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
 }
 
-/*
-__host__ __device__
-bool intersectRayAABB(const Ray& ray, const AABB& aabb) {
-    float3 invDir = make_float3(1.0f,1.0f,1.0f) / make_float3(ray.direction.x,
-ray.direction.y, ray.direction.z); float3 t0 = (make_float3(aabb.min.x,
-aabb.min.y, aabb.min.z) - make_float3(ray.origin.x, ray.origin.y, ray.origin.z))
-* invDir; float3 t1 = (make_float3(aabb.max.x, aabb.max.y, aabb.max.z) -
-make_float3(ray.origin.x, ray.origin.y, ray.origin.z)) * invDir;
-
-    float3 tMin = fminf(t0, t1);
-    float3 tMax = fmaxf(t0, t1);
-
-    float tNear = fmaxf(fmaxf(tMin.x, tMin.y), tMin.z);
-    float tFar = fminf(fminf(tMax.x, tMax.y), tMax.z);
-
-    return tNear <= tFar && tFar >= 0.0f; // Return true if there is an
-intersection
-}
-*/
-/*
-__host__ __device__
-AABB calculateRayBoundingBox(const Ray& ray, float delta) {
-    float4 minPoint = ray.origin + ray.direction * delta;
-    float4 maxPoint = minPoint;
-    float epsilon = delta;
-
-    minPoint.x -= epsilon; maxPoint.x += epsilon;
-    minPoint.y -= epsilon; maxPoint.y += epsilon;
-    minPoint.z -= epsilon; maxPoint.z += epsilon;
-
-    return AABB{ minPoint, maxPoint };
-}
-*/
-
-/*
-__host__ __device__
-float angleScalar(const float4 v1, const float4 v2) {
-    float p = (v1.x) * (v2.x) + (v1.y) * (v2.y) + (v1.z) * (v2.z);
-    float n1 = sqrt(v1.x * v1.x + v1.y * v1.y + v1.z * v1.z);
-    float n2 = sqrt(v2.x * v2.x + v2.y * v2.y + v2.z * v2.z);
-    float d = n1 * n2;
-    float res = 0.0f;
-    if (d > 0.0f) {
-        float r = p / d;
-        if (r > 1.0f) r = 1.0f;
-        res = acos(r);
-    }
-    return (res);  // in radian
-}
-*/
 
 __host__ __device__ float angleScalar(const float4 v1, const float4 v2) {
   float p = (v1.x * v2.x) + (v1.y * v2.y) + (v1.z * v2.z);
@@ -810,6 +760,8 @@ __device__ __inline__ float4 normalize(float4 v) {
 }
 
 
+//**************************************************************************************************************
+//--------------------------------------------------------------------------------------------------------------
 
 template <typename T, typename U>
 __global__ void rayTracingKernelExploration001(lbvh::bvh_device<T, U> bvh_dev,
@@ -1020,7 +972,13 @@ __global__ void rayTracingKernelExploration001(lbvh::bvh_device<T, U> bvh_dev,
   }
 }
 
+//--------------------------------------------------------------------------------------------------------------
+//**************************************************************************************************************
 
+
+
+//**************************************************************************************************************
+//--------------------------------------------------------------------------------------------------------------
 
 template <typename T, typename U>
 __global__ void rayTracingKernelExploration002(lbvh::bvh_device<T, U> bvh_dev,
@@ -1126,9 +1084,40 @@ __global__ void rayTracingKernelExploration002(lbvh::bvh_device<T, U> bvh_dev,
   d_HitRays[idx] = hitResult;
 }
 
+//--------------------------------------------------------------------------------------------------------------
+//**************************************************************************************************************
+
+
+
+
+//**************************************************************************************************************
+//--------------------------------------------------------------------------------------------------------------
+
+
+__host__ __device__ void initializeDirections(float4 *directions) {
+  const float c1 = 1.0f / sqrt(3.0f);
+  const float4 predefinedDirections[14] = {
+      make_float4(1.0f, 0.0f, 0.0f, 0.0f), make_float4(-1.0f, 0.0f, 0.0f, 0.0f),
+      make_float4(0.0f, 1.0f, 0.0f, 0.0f), make_float4(0.0f, -1.0f, 0.0f, 0.0f),
+      make_float4(0.0f, 0.0f, 1.0f, 0.0f), make_float4(0.0f, 0.0f, -1.0f, 0.0f),
+      make_float4(c1, c1, c1, 0.0f),       make_float4(c1, c1, -c1, 0.0f),
+      make_float4(-c1, c1, c1, 0.0f),      make_float4(-c1, c1, -c1, 0.0f),
+      make_float4(c1, -c1, c1, 0.0f),      make_float4(c1, -c1, -c1, 0.0f),
+      make_float4(-c1, -c1, c1, 0.0f),     make_float4(-c1, -c1, -c1, 0.0f)};
+
+  for (int i = 0; i < 14; ++i) {
+    directions[i] = predefinedDirections[i];
+  }
+}
+
+__global__ void initializeDirectionsKernel(float4 *directions) {
+  initializeDirections(directions);
+}
+
+
 template <typename T, typename U>
 __global__ void
-rayTracingKernelExploration002Gamma(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
+rayTracingKernelExplorationOptimized(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
                                     HitRay *d_HitRays, int numRays,
                                     float4 *directions) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1238,135 +1227,13 @@ rayTracingKernelExploration002Gamma(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
   }
 }
 
-//*************************************************************++++++++++++++++++=************
-
-__host__ __device__ void initializeDirections(float4 *directions) {
-  const float c1 = 1.0f / sqrt(3.0f);
-  const float4 predefinedDirections[14] = {
-      make_float4(1.0f, 0.0f, 0.0f, 0.0f), make_float4(-1.0f, 0.0f, 0.0f, 0.0f),
-      make_float4(0.0f, 1.0f, 0.0f, 0.0f), make_float4(0.0f, -1.0f, 0.0f, 0.0f),
-      make_float4(0.0f, 0.0f, 1.0f, 0.0f), make_float4(0.0f, 0.0f, -1.0f, 0.0f),
-      make_float4(c1, c1, c1, 0.0f),       make_float4(c1, c1, -c1, 0.0f),
-      make_float4(-c1, c1, c1, 0.0f),      make_float4(-c1, c1, -c1, 0.0f),
-      make_float4(c1, -c1, c1, 0.0f),      make_float4(c1, -c1, -c1, 0.0f),
-      make_float4(-c1, -c1, c1, 0.0f),     make_float4(-c1, -c1, -c1, 0.0f)};
-
-  for (int i = 0; i < 14; ++i) {
-    directions[i] = predefinedDirections[i];
-  }
-}
-
-__global__ void initializeDirectionsKernel(float4 *directions) {
-  initializeDirections(directions);
-}
-
-//*************************************************************++++++++++++++++++=************
-
-__host__ __device__ lbvh::aabb<float> calculateRayBoundingBox(const Ray &ray,
-                                                              float delta) {
-  float4 minPoint = ray.origin + ray.direction * delta;
-  float4 maxPoint = minPoint;
-  float epsilon = delta;
-
-  minPoint.x -= epsilon;
-  maxPoint.x += epsilon;
-  minPoint.y -= epsilon;
-  maxPoint.y += epsilon;
-  minPoint.z -= epsilon;
-  maxPoint.z += epsilon;
-
-  lbvh::aabb<float> boundingBox;
-  boundingBox.lower = make_float4(minPoint.x, minPoint.y, minPoint.z, 0);
-  boundingBox.upper = make_float4(maxPoint.x, maxPoint.y, maxPoint.z, 0);
-
-  return boundingBox;
-}
-
-template <typename T, typename U>
-__global__ void rayTracingKernelExploration003(lbvh::bvh_device<T, U> bvh_dev,
-                                               Ray *rays, HitRay *d_HitRays,
-                                               int numRays) {
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= numRays)
-    return;
-
-  Ray ray = rays[idx];
-  d_HitRays[idx].hitResults = -1;
-  d_HitRays[idx].distanceResults = INFINITY;
-  d_HitRays[idx].intersectionPoint = make_float3(INFINITY, INFINITY, INFINITY);
-  d_HitRays[idx].idResults = -1;
-
-  constexpr float epsilon = 0.001f;
-  constexpr int maxIterations = 20;
-  constexpr int maxOverlappingTriangles = 10; // Adjust as needed
-
-  float delta = -epsilon;
-  bool foundCandidate = false;
-  Triangle closestTriangle;
-  int closestTriangleId = -1;
-
-  for (int iteration = 0; iteration < maxIterations; ++iteration) {
-    unsigned int buffer[maxOverlappingTriangles];
-    auto rayBoundingBox = calculateRayBoundingBox(ray, delta);
-    auto num_found = lbvh::query_device(bvh_dev, lbvh::overlaps(rayBoundingBox),
-                                        maxOverlappingTriangles, buffer);
-
-    float4 currentPosition = ray.origin + ray.direction * delta;
-
-    for (unsigned int i = 0; i < num_found; ++i) {
-      const auto triangleIndex = buffer[i];
-      const Triangle &hitTriangle = bvh_dev.objects[triangleIndex];
-
-      float4 triangleCenter =
-          (hitTriangle.v1 + hitTriangle.v2 + hitTriangle.v3) / 3.0f;
-      float4 directionToTriangle = triangleCenter - ray.origin;
-
-      float angleToTriangle =
-          fabs(angleScalar(directionToTriangle, ray.direction));
-      float distanceToTriangle = length(directionToTriangle);
-      float halfOpeningAngle =
-          calculateHalfOpeningAngle(hitTriangle, ray.origin);
-
-      if (halfOpeningAngle > 0.4f) {
-        float t;
-        if (rayTriangleIntersect(ray, hitTriangle, t)) {
-          float4 hit_point = ray.origin + ray.direction * t;
-          d_HitRays[idx].hitResults = triangleIndex;
-          d_HitRays[idx].distanceResults =
-              t - length(ray.origin - currentPosition);
-          d_HitRays[idx].intersectionPoint =
-              make_float3(hit_point.x, hit_point.y, hit_point.z);
-          d_HitRays[idx].idResults = hitTriangle.id;
-          return;
-        }
-      } else if (angleToTriangle > 0.6f) {
-        delta += distanceToTriangle * 0.5f + epsilon;
-      } else {
-        foundCandidate = true;
-        closestTriangleId = triangleIndex;
-        closestTriangle = hitTriangle;
-      }
-    }
-
-    delta += epsilon;
-  }
-
-  if (foundCandidate && closestTriangleId != -1) {
-    float t;
-    if (rayTriangleIntersect(ray, closestTriangle, t)) {
-      float4 hit_point = ray.origin + ray.direction * t;
-      d_HitRays[idx].hitResults = closestTriangleId;
-      d_HitRays[idx].distanceResults = t;
-      d_HitRays[idx].intersectionPoint =
-          make_float3(hit_point.x, hit_point.y, hit_point.z);
-      d_HitRays[idx].idResults = closestTriangle.id;
-    }
-  }
-}
+//--------------------------------------------------------------------------------------------------------------
+//**************************************************************************************************************
 
 
 
-
+//**************************************************************************************************************
+//--------------------------------------------------------------------------------------------------------------
 
 bool loadOBJTriangle(const std::string &filename,
                      std::vector<Triangle> &triangles, const int &id) {
@@ -1422,6 +1289,10 @@ bool loadOBJTriangle(const std::string &filename,
             << triangles.size() << " triangles from " << filename << std::endl;
   return true;
 }
+
+//--------------------------------------------------------------------------------------------------------------
+//**************************************************************************************************************
+
 
 
 void Test002(int mode) {
@@ -1559,8 +1430,8 @@ void Test002(int mode) {
   // h_rays[0].origin = make_float4(0.9f, 0.9f, 0.9, 1.0f);
   // h_rays[0].origin = make_float4(0.9f, 0.9f, 1.0, 1.0f);
 
-  // h_rays[0].origin = make_float4(1.5f, 0.0f, 0.0, 1.0f);
-  h_rays[0].direction = make_float4(-1.0f, 0.0f, 0.0f, 0.0f);
+  h_rays[0].origin = make_float4(1.5f, 0.0f, 0.0, 1.0f);
+  h_rays[0].direction = make_float4(1.0f, 0.0f, 0.0f, 0.0f);
   normalizeRayDirection(h_rays[0]);
 
   // h_rays[0].origin = make_float4(0.5f, 0.5f, 0.5, 1.0f);
@@ -1600,7 +1471,7 @@ void Test002(int mode) {
     initializeDirections(h_directions);
     hipMalloc(&d_directions, numDirections * sizeof(float4));
     initializeDirectionsKernel<<<1, 1>>>(d_directions);
-    rayTracingKernelExploration002Gamma<float, Triangle>
+    rayTracingKernelExplorationOptimized<float, Triangle>
         <<<blocksPerGrid, threadsPerBlock>>>(bvh_dev, d_rays, d_hitRays,
                                              numRays, d_directions);
 
