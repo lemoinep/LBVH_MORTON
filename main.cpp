@@ -763,214 +763,6 @@ __device__ __inline__ float4 normalize(float4 v) {
 //**************************************************************************************************************
 //--------------------------------------------------------------------------------------------------------------
 
-template <typename T, typename U>
-__global__ void rayTracingKernelExploration001(lbvh::bvh_device<T, U> bvh_dev,
-                                               Ray *rays, HitRay *d_HitRays,
-                                               int numRays) {
-  // The objective of this function is to explore in the direction of the ray
-  // the candidate triangle which intersects. Like an explorer drone that
-  // encounters a wall
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= numRays)
-    return;
-
-  bool isView = true;
-  // isView = false;
-
-  Ray ray = rays[idx];
-  const auto calc = distance_calculator();
-
-  // Initialization of results
-  d_HitRays[idx].hitResults = -1;
-  d_HitRays[idx].distanceResults = INFINITY; // distance
-  d_HitRays[idx].intersectionPoint = make_float3(INFINITY, INFINITY, INFINITY);
-  d_HitRays[idx].idResults = -1;
-
-  constexpr float epsilon = 0.001f;
-  constexpr float angleLim = 0.6f;
-  constexpr int maxLoops = 50;
-
-  float angle1 = INFINITY;
-  float angle2 = INFINITY;
-  float distToTri = 0.0f;
-  bool flag = true;
-  bool flagOk = false;
-  bool flagFindCandidate = false;
-  Triangle hit_tri;
-  int idNest = -1;
-  int idNestC = -1;
-  int idNestCd = -1;
-  int nbLoop = 1;
-  float delta = -epsilon; // PB inside triangle
-  float distanceToPlane = 0.0f;
-  float distanceToPlaneOld = distanceToPlane;
-  bool go1 = false;
-
-  if ((1 == 1)) {
-    if (isView)
-      printf("[%i] NOT FOUND\n", idx);
-    const float epsilonC = 0.01f;
-    const float4 directions[14] = {
-        make_float4(1.0f, 0.0f, 0.0f, 0.0f),
-        make_float4(-1.0f, 0.0f, 0.0f, 0.0f),
-        make_float4(0.0f, 1.0f, 0.0f, 0.0f),
-        make_float4(0.0f, -1.0f, 0.0f, 0.0f),
-        make_float4(0.0f, 0.0f, 1.0f, 0.0f),
-        make_float4(0.0f, 0.0f, -1.0f, 0.0f),
-
-        make_float4(0.577f, 0.577f, 0.577f, 0.0f),
-        make_float4(0.577f, 0.577f, -0.577f, 0.0f),
-        make_float4(-0.577f, 0.577f, 0.577f, 0.0f),
-        make_float4(-0.577f, 0.577f, -0.577f, 0.0f),
-
-        make_float4(0.577f, -0.577f, 0.577f, 0.0f),
-        make_float4(0.577f, -0.577f, -0.577f, 0.0f),
-        make_float4(-0.577f, -0.577f, 0.577f, 0.0f),
-        make_float4(-0.577f, -0.577f, -0.577f, 0.0f)};
-
-    for (int i = 0; i < 14; ++i) {
-      // float4 direction1 = normalize(directions[i]);
-
-      float4 currentPosition = ray.origin + directions[i] * epsilonC;
-      const auto nearestTriangleIndex = lbvh::query_device(
-          bvh_dev, lbvh::nearest(currentPosition), distance_calculator());
-
-      if (nearestTriangleIndex.first != 0xFFFFFFFF) {
-        const Triangle &hitTriangle =
-            bvh_dev.objects[nearestTriangleIndex.first];
-        if (pointInTriangle2(currentPosition, hitTriangle, 0.0001f)) {
-          float t;
-          rayTriangleIntersect(rays[idx], hitTriangle, t);
-          {
-            float4 hit_point = ray.origin + ray.direction * t;
-            if (isView) {
-              printf(
-                  "Ray %d hit triangle %d at point (%f, %f, %f) Distance:%f\n",
-                  idx, idNest, hit_point.x, hit_point.y, hit_point.z, t);
-            }
-            d_HitRays[idx].hitResults = idNest;
-            d_HitRays[idx].distanceResults = t; // distance
-            d_HitRays[idx].intersectionPoint =
-                make_float3(hit_point.x, hit_point.y, hit_point.z);
-            d_HitRays[idx].idResults = hitTriangle.id;
-          }
-          flag = false;
-          break; // Exit the loop once we find a valid intersection
-        }
-      }
-    }
-  }
-
-  while (flag) {
-    float4 pos = ray.origin + ray.direction * delta;
-    // printf("Pos=%f %f %f\n",pos.x,pos.y,pos.z);
-    const auto nest = lbvh::query_device(bvh_dev, lbvh::nearest(pos), calc);
-    flag = false;
-    nbLoop++;
-    if (nest.first != 0xFFFFFFFF) {
-      const auto &hit_triangle = bvh_dev.objects[nest.first];
-      float4 v0 = hit_triangle.v2 - hit_triangle.v1;
-      float4 v1 = hit_triangle.v3 - hit_triangle.v1;
-      float4 v2 = pos - hit_triangle.v1;
-      float4 normal = cross(v0, v1);
-      distanceToPlaneOld = distanceToPlane;
-      distanceToPlane = dot(normal, v2) / length(normal);
-
-      float4 dT;
-      dT.x =
-          (hit_triangle.v1.x + hit_triangle.v2.x + hit_triangle.v3.x) / 3.0f -
-          pos.x;
-      dT.y =
-          (hit_triangle.v1.y + hit_triangle.v2.y + hit_triangle.v3.y) / 3.0f -
-          pos.y;
-      dT.z =
-          (hit_triangle.v1.z + hit_triangle.v2.z + hit_triangle.v3.z) / 3.0f -
-          pos.z;
-
-      angle1 = fabs(angleScalar(dT, ray.direction));
-      distToTri = sqrt(dT.x * dT.x + dT.y * dT.y + dT.z * dT.z);
-      flagOk = true;
-      idNestCd = idNest;
-      idNest = nest.first;
-      hit_tri = hit_triangle;
-      float angle2 = calculateHalfOpeningAngle(hit_triangle, ray.origin);
-      printf("NbLoop=%i In FIRST dist=%f angle1=%f angleSol2=%f distToTri=%f "
-             "Old= %f\n",
-             nbLoop, distanceToPlane, angle1, angle2, distToTri,
-             distanceToPlaneOld);
-      printf("pos =<%f,%f,%f> idNest=%i\n", pos.x, pos.y, pos.z, idNest);
-
-      // if (angle1 > angleLim) { flag = true; flagOk = false; delta = delta+
-      // distToTri*0.25f + epsilon;  }
-
-      if (angle1 > 0.2f) {
-        flag = true;
-        flagOk = false;
-        delta = epsilon * exp((nbLoop - 1) * 0.15);
-      }
-      if (angle2 > 0.577f) {
-        flag = false;
-        flagOk = true;
-        go1 = true;
-        idNestC = idNest;
-      } // si pres
-
-      if ((distanceToPlane < 0.0) && (distanceToPlaneOld > 0.0) &&
-          (nbLoop > 2)) {
-        flag = false;
-        flagOk = true;
-        idNestC = idNest;
-      }
-      // else if ((distanceToPlane==0.0) && (nbLoop>1)) {  flag = false;
-      // flagOk=true; idNestC=idNestCd;  }
-
-      printf("NbLoop=%i deltat=%f\n", nbLoop, delta);
-
-    } else {
-      delta = epsilon * exp(nbLoop * 0.5);
-    }
-
-    if (nbLoop > maxLoops) {
-      go1 = true;
-    }
-
-    if (go1) {
-      flag = false;
-      flagOk = false;
-      if (flagFindCandidate) {
-        if (isView)
-          printf("Potential Candidate\n");
-        flagOk = true;
-        idNest = idNestC;
-        const auto &hit_triangle = bvh_dev.objects[idNest];
-        hit_tri = hit_triangle;
-      }
-    }
-  }
-
-  if (isView)
-    printf("*****  Ray %d Level 1 finished\n", idx);
-
-  if (flagOk) {
-    float t;
-    if (rayTriangleIntersect(ray, hit_tri, t)) {
-      float4 hit_point = ray.origin + ray.direction * t;
-      if (isView) {
-        printf("Ray %d hit triangle %d at point (%f, %f, %f) Distance:%f\n",
-               idx, idNest, hit_point.x, hit_point.y, hit_point.z, t);
-      }
-      d_HitRays[idx].hitResults = idNest;
-      d_HitRays[idx].distanceResults = t; // distance
-      d_HitRays[idx].intersectionPoint =
-          make_float3(hit_point.x, hit_point.y, hit_point.z);
-      d_HitRays[idx].idResults = hit_tri.id;
-    }
-  } else {
-    // No items found
-    if (isView)
-      printf("Ray %d did not hit any triangle\n", idx);
-  }
-}
 
 //--------------------------------------------------------------------------------------------------------------
 //**************************************************************************************************************
@@ -1441,6 +1233,11 @@ void Test002(int mode) {
   // h_rays[0].origin = make_float4(0.9f, 0.9f, 1.0, 1.0f);
 
   //h_rays[0].origin = make_float4(1.5f, 0.0f, 0.0, 1.0f);
+
+  h_rays[0].origin = make_float4(-15.5f, 0.5f, 0.5, 1.0f);
+
+  h_rays[0].origin = make_float4(2.75f, 0.0f, 0.0, 1.0f);
+
   h_rays[0].direction = make_float4(1.0f, 0.0f, 0.0f, 0.0f);
   normalizeRayDirection(h_rays[0]);
 
@@ -1469,9 +1266,7 @@ void Test002(int mode) {
   // if (mode==0) {  rayTracingKernel<<float, Triangle> <<<blocksPerGrid,
   // threadsPerBlock>>>(bvh_dev, d_rays, d_hitRays, numRays); }
   if (mode == 1) {
-    rayTracingKernelExploration001<float, Triangle>
-        <<<blocksPerGrid, threadsPerBlock>>>(bvh_dev, d_rays, d_hitRays,
-                                             numRays);
+    
   }
   if (mode == 2) {
     rayTracingKernelExploration002<float, Triangle>
@@ -1487,6 +1282,8 @@ void Test002(int mode) {
     initializeDirections(h_directions);
     hipMalloc(&d_directions, numDirections * sizeof(float4));
     initializeDirectionsKernel<<<1, 1>>>(d_directions);
+
+    
     rayTracingKernelExplorationOptimized<float, Triangle>
         <<<blocksPerGrid, threadsPerBlock>>>(bvh_dev, d_rays, d_hitRays,
                                              numRays, d_directions);
