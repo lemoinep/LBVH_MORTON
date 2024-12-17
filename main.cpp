@@ -1141,6 +1141,7 @@ rayTracingKernelExplorationOptimized(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
   int closestTriangleId = -1;
   int step = 1;
   float t;
+  bool isViewInfo=true;
 
   if (step == 1) {
     step = 2;
@@ -1153,13 +1154,13 @@ rayTracingKernelExplorationOptimized(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
       if (nearestTriangleIndex.first != 0xFFFFFFFF) {
         const Triangle &hitTriangle =
             bvh_dev.objects[nearestTriangleIndex.first];
-        if (pointInTriangle2(currentPosition, hitTriangle, 0.001f)) {
+        if (pointInTriangle2(currentPosition, hitTriangle, 0.01f)) {
 
-          printf("in step1-level1\n");
+          if (isViewInfo) printf("in step1-level1\n");
 
           rayTriangleIntersect(rays[idx], hitTriangle, t);
           {
-            printf("in step1-level2\n");
+            if (isViewInfo) printf("in step1-level2 it=%i\n",i);
             float4 hit_point = ray.origin + ray.direction * t;
             d_HitRays[idx].hitResults = nearestTriangleIndex.first;
             d_HitRays[idx].distanceResults = t; // distance
@@ -1178,7 +1179,7 @@ rayTracingKernelExplorationOptimized(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
   __syncthreads();
 
   if (step == 2) {
-    printf("in step2-level1\n");
+    if (isViewInfo) printf("in step2-level1\n");
     float dp = 0.0f;
     float angleToTriangle = INFINITY;
     float distanceToTriangle = 0.0f;
@@ -1215,6 +1216,7 @@ rayTracingKernelExplorationOptimized(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
 
         // if (halfOpeningAngle > 0.01f) { // Close object check
         if (rayTriangleIntersect(ray, hitTriangle, t)) {
+          if (isViewInfo) printf("in step2-level2 it=%i\n",iteration);
           float4 hit_point = ray.origin + ray.direction * t;
           d_HitRays[idx].hitResults = nearestTriangleIndex.first;
           d_HitRays[idx].distanceResults = length(ray.origin - hit_point);
@@ -1430,10 +1432,10 @@ void Test002(int mode) {
 
   h_rays[0].origin = make_float4(1.0f, 1.0f, 1.0, 1.0f);
 
-  // h_rays[0].origin = make_float4(4.5f, 0.4f, 0.5, 1.0f);
+  //h_rays[0].origin = make_float4(4.5f, 0.4f, 0.5, 1.0f);
   // h_rays[0].origin = make_float4(0.8f, 0.7f, 0.7f, 1.0f);
 
-  h_rays[0].origin = make_float4(0.5f, 0.5f, 0.5, 1.0f);
+  //h_rays[0].origin = make_float4(0.5f, 0.5f, 0.5, 1.0f);
 
   // h_rays[0].origin = make_float4(0.9f, 0.9f, 0.9, 1.0f);
   // h_rays[0].origin = make_float4(0.9f, 0.9f, 1.0, 1.0f);
@@ -1453,6 +1455,12 @@ void Test002(int mode) {
 
   HitRay *d_hitRays;
   hipMalloc(&d_hitRays, numRays * sizeof(HitRay));
+
+
+  hipEvent_t start1, stop1;
+  hipEventCreate(&start1);
+  hipEventCreate(&stop1);
+  hipEventRecord(start1);
 
   t_begin_1 = std::chrono::steady_clock::now();
   int threadsPerBlock = 512;
@@ -1489,6 +1497,14 @@ void Test002(int mode) {
 
 
   hipDeviceSynchronize();
+
+  hipEventRecord(stop1);
+  hipEventSynchronize(stop1);
+  float milliseconds1 = 0;
+  hipEventElapsedTime(&milliseconds1, start1, stop1);
+  
+  hipEventDestroy(start1);
+  hipEventDestroy(stop1);
   t_end_1 = std::chrono::steady_clock::now();
 
   thrust::host_vector<HitRay> h_hitRays(numRays);
@@ -1537,19 +1553,38 @@ void Test002(int mode) {
   std::cout << "[INFO]: Elapsed microseconds inside Ray Tracing : " << t_laps
             << " us\n";
 
+  std::cout <<"[INFO]: Elapsed microseconds inside Ray Tracing : "<<milliseconds1<< " ms with hip chrono\n";
+
   hipFree(d_rays);
   hipFree(d_hitRays);
   h_rays.clear();
   h_hitRays.clear();
 }
 
+void runGPU()
+{
+    const int numDirections = 14;
+    float4 *h_directions;
+    float4 *d_directions;
+    h_directions = new float4[numDirections];
+    initializeDirections(h_directions);
+    hipMalloc(&d_directions, numDirections * sizeof(float4));
+    initializeDirectionsKernel<<<1, 1>>>(d_directions);
+}
+
 int main() {
+  runGPU();
   std::cout << "\n";
   // std::cout << "[INFO]: Methode 1\n"; Test002(1);
   //std::cout << "[INFO]: Methode 2\n"; Test002(2); std::cout << "\n";
   std::cout << "[INFO]: Methode 2\n";
   Test002(3);
   std::cout << "\n";
+
+  //std::cout << "[INFO]: Methode 2 again\n";
+  //Test002(3);
+  //std::cout << "\n";
+
   std::cout << "[INFO]: WELL DONE :-) FINISHED !\n";
   return 0;
 }
