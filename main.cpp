@@ -926,6 +926,7 @@ rayTracingKernelExplorationOptimized(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
   constexpr float epsilon = 0.001f;
   constexpr float angleLimit = 0.6f;
   constexpr int maxIterations = 50;
+  constexpr float angleToTriangleLim=0.2f;
 
   float delta = -epsilon * 1.0f; // Initial delta for ray advancement
   bool foundCandidate = false;
@@ -968,7 +969,7 @@ rayTracingKernelExplorationOptimized(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
     
   }
 
-  __syncthreads();
+  //__syncthreads();
 
   if (step == 2) {
     if (isViewInfo) printf("in step2-level1\n");
@@ -1000,12 +1001,6 @@ rayTracingKernelExplorationOptimized(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
         distanceToTriangle = length(directionToTriangle);
         halfOpeningAngle = calculateHalfOpeningAngle(hitTriangle, ray.origin);
 
-        // printf("oRay %d: Nearest object index: %u Distance to nearest
-        // object:%f delta=%f  ", idx,
-        // nearestTriangleIndex.first,nearestTriangleIndex.second,delta);
-        // printf("<%f,%f,%f> halfOpeningAngle=%f angleToTriangle=%f\n",
-        // currentPosition.x,currentPosition.y,currentPosition.z,halfOpeningAngle,angleToTriangle);
-
         // if (halfOpeningAngle > 0.01f) { // Close object check
         if (rayTriangleIntersect(ray, hitTriangle, t)) {
           if (isViewInfo) printf("in step2-level2 it=%i\n",iteration);
@@ -1020,13 +1015,107 @@ rayTracingKernelExplorationOptimized(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
         //}
       }
 
-      if (angleToTriangle > 0.2f) {
+      if (angleToTriangle > angleToTriangleLim) {
         // delta += epsilon * exp(iteration*0.25f);
         delta += distanceToTriangle * 0.75f + epsilon;
       }
 
     } // END FOR
   }
+}
+
+//--------------------------------------------------------------------------------------------------------------
+//**************************************************************************************************************
+
+
+
+//**************************************************************************************************************
+//--------------------------------------------------------------------------------------------------------------
+
+__device__ void updateHitResults(HitRay &hitRay, unsigned int triangleIndex, float t, const Ray &ray, const Triangle &hitTriangle) {
+    float4 hit_point = ray.origin + ray.direction * t;
+    hitRay.hitResults = triangleIndex;
+    hitRay.distanceResults = t;
+    hitRay.intersectionPoint = make_float3(hit_point.x, hit_point.y, hit_point.z);
+    hitRay.idResults = hitTriangle.id;
+}
+
+template <typename T, typename U>
+__global__ void rayTracingKernelExplorationOptimized2(
+    lbvh::bvh_device<T, U> bvh_dev, Ray *rays, HitRay *d_HitRays, int numRays, float4 *directions) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numRays) return;
+
+    Ray ray = rays[idx];
+    HitRay &hitRay = d_HitRays[idx];
+    
+    // Initialize hit results
+    d_HitRays[idx].hitResults = -1;
+    d_HitRays[idx].distanceResults = INFINITY; // distance
+    d_HitRays[idx].intersectionPoint = make_float3(INFINITY, INFINITY, INFINITY);
+    d_HitRays[idx].idResults = -1;
+
+    constexpr float epsilon = 0.001f;
+    constexpr int maxIterations = 50;
+    constexpr float epsilonC = 0.01f;
+    constexpr float angleToTriangleLim=0.2f;
+
+    bool isViewInfo=true; //isViewInfo=false;
+
+    float t;
+
+    // Step 1: Quick intersection check
+    for (int i = 0; i < 14; ++i) {
+        float4 currentPosition = ray.origin + directions[i] * epsilonC;
+        auto nearestTriangleIndex = lbvh::query_device(bvh_dev, lbvh::nearest(currentPosition), distance_calculator());
+
+        if (nearestTriangleIndex.first != 0xFFFFFFFF) {
+            const Triangle &hitTriangle = bvh_dev.objects[nearestTriangleIndex.first];
+            if (pointInTriangle2(currentPosition, hitTriangle, 0.01f)) {
+                if (isViewInfo) printf("in step1-level1\n");
+                
+                rayTriangleIntersect(ray, hitTriangle, t);
+                {
+                    if (isViewInfo) printf("in step1-level2 it=%i\n",i);
+                    updateHitResults(hitRay, nearestTriangleIndex.first, t, ray, hitTriangle);
+                    return;
+                }
+            }
+        }
+    }
+
+    // Step 2: Iterative ray marching
+    if (isViewInfo) printf("in step2-level1\n");
+    float delta = epsilon;
+    float4 currentPosition, lastPosition = ray.origin;
+
+    for (int iteration = 0; iteration < maxIterations; ++iteration) {
+        currentPosition = ray.origin + ray.direction * delta;
+        if (currentPosition == lastPosition) {
+            delta += epsilon;
+            continue;
+        }
+        lastPosition = currentPosition;
+
+        auto nearestTriangleIndex = lbvh::query_device(bvh_dev, lbvh::nearest(currentPosition), distance_calculator());
+        if (nearestTriangleIndex.first != 0xFFFFFFFF) {
+            const Triangle &hitTriangle = bvh_dev.objects[nearestTriangleIndex.first];
+            float4 directionToTriangle = ((hitTriangle.v1 + hitTriangle.v2 + hitTriangle.v3) / 3.0f) - ray.origin;
+            
+            float angleToTriangle = fabs(angleScalar(directionToTriangle, ray.direction));
+            float distanceToTriangle = length(directionToTriangle);
+
+            if (rayTriangleIntersect(ray, hitTriangle, t)) {
+                if (isViewInfo) printf("in step2-level2 it=%i\n",iteration);
+                updateHitResults(hitRay, nearestTriangleIndex.first, t, ray, hitTriangle);
+                return;
+            }
+
+            delta += (angleToTriangle > angleToTriangleLim) ? (distanceToTriangle * 0.75f + epsilon) : epsilon;
+        } else {
+            delta += epsilon;
+        }
+    }
 }
 
 //--------------------------------------------------------------------------------------------------------------
@@ -1236,7 +1325,7 @@ void Test002(int mode) {
 
   h_rays[0].origin = make_float4(-15.5f, 0.5f, 0.5, 1.0f);
 
-  h_rays[0].origin = make_float4(2.75f, 0.0f, 0.0, 1.0f);
+  //h_rays[0].origin = make_float4(2.75f, 0.0f, 0.0, 1.0f);
 
   h_rays[0].direction = make_float4(1.0f, 0.0f, 0.0f, 0.0f);
   normalizeRayDirection(h_rays[0]);
@@ -1285,6 +1374,24 @@ void Test002(int mode) {
 
     
     rayTracingKernelExplorationOptimized<float, Triangle>
+        <<<blocksPerGrid, threadsPerBlock>>>(bvh_dev, d_rays, d_hitRays,
+                                             numRays, d_directions);
+
+    hipFree( d_directions );
+    delete [] h_directions;
+  }
+
+   if (mode == 4) {
+    const int numDirections = 14;
+    float4 *h_directions;
+    float4 *d_directions;
+    h_directions = new float4[numDirections];
+    initializeDirections(h_directions);
+    hipMalloc(&d_directions, numDirections * sizeof(float4));
+    initializeDirectionsKernel<<<1, 1>>>(d_directions);
+
+    
+    rayTracingKernelExplorationOptimized2<float, Triangle>
         <<<blocksPerGrid, threadsPerBlock>>>(bvh_dev, d_rays, d_hitRays,
                                              numRays, d_directions);
 
@@ -1358,29 +1465,50 @@ void Test002(int mode) {
   h_hitRays.clear();
 }
 
+
+
+__global__ void onKernel(float4 *nothing) {
+  // nothing void
+} 
+
+
 void runGPU()
 {
-    const int numDirections = 14;
-    float4 *h_directions;
-    float4 *d_directions;
-    h_directions = new float4[numDirections];
-    initializeDirections(h_directions);
-    hipMalloc(&d_directions, numDirections * sizeof(float4));
-    initializeDirectionsKernel<<<1, 1>>>(d_directions);
+    hipEvent_t start1, stop1;
+    hipEventCreate(&start1);
+    hipEventCreate(&stop1);
+    hipEventRecord(start1);
+
+    float4 *d_nothing;
+    hipMalloc(&d_nothing, 14 * sizeof(float4));
+    onKernel<<<1, 1>>>(d_nothing);
+
+    hipEventRecord(stop1);
+    hipEventSynchronize(stop1);
+    float milliseconds1 = 0;
+    hipEventElapsedTime(&milliseconds1, start1, stop1);
+
+    std::cout <<"[INFO]: Elapsed microseconds inside graphics card preheating : "<<milliseconds1<< " ms with hip chrono\n";
 }
 
 int main() {
+  std::cout << "\n";
   runGPU();
   std::cout << "\n";
-  // std::cout << "[INFO]: Methode 1\n"; Test002(1);
-  //std::cout << "[INFO]: Methode 2\n"; Test002(2); std::cout << "\n";
-  std::cout << "[INFO]: Methode 2\n";
+
+
+  std::cout << "[INFO]: Methode 3\n";
   Test002(3);
   std::cout << "\n";
 
   //std::cout << "[INFO]: Methode 2 again\n";
   //Test002(3);
   //std::cout << "\n";
+
+
+  std::cout << "[INFO]: Methode 4\n";
+  Test002(4);
+  std::cout << "\n";
 
   std::cout << "[INFO]: WELL DONE :-) FINISHED !\n";
   return 0;
