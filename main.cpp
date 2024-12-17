@@ -934,7 +934,7 @@ rayTracingKernelExplorationOptimized(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
   int closestTriangleId = -1;
   int step = 1;
   float t;
-  bool isViewInfo=true;
+  bool isViewInfo=true; isViewInfo=false;
 
   if (step == 1) {
     step = 2;
@@ -1060,7 +1060,7 @@ __global__ void rayTracingKernelExplorationOptimized2(
     constexpr float epsilonC = 0.01f;
     constexpr float angleToTriangleLim=0.2f;
 
-    bool isViewInfo=true; //isViewInfo=false;
+    bool isViewInfo=true; isViewInfo=false;
 
     float t;
 
@@ -1491,9 +1491,15 @@ void runGPU()
     std::cout <<"[INFO]: Elapsed microseconds inside graphics card preheating : "<<milliseconds1<< " ms with hip chrono\n";
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+
+  bool isPreheating=false; 
+
+  if (argc>0) isPreheating=bool(atoi(argv[1]));
+  //std::cout<<argv[1];
+
   std::cout << "\n";
-  runGPU();
+  if (isPreheating) runGPU();
   std::cout << "\n";
 
 
