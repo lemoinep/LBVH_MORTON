@@ -1135,19 +1135,25 @@ __global__ void rayTracingKernelExplorationOptimized2(
 //--------------------------------------------------------------------------------------------------------------
 
 void showInformationAABB(const lbvh::aabb<float>& aabb) {
+
+    float width = aabb.upper.x - aabb.lower.x;
+    float height = aabb.upper.y - aabb.lower.y;
+    float depth = aabb.upper.z - aabb.lower.z;
+    float lengthMax=length(aabb.upper-aabb.lower);
+    float volume = width * height * depth;
+
     printf("\n");
     printf("[INFO]: Bounding box:\n");
     printf("[INFO]:   Lower corner: (%.6f, %.6f, %.6f)\n", aabb.lower.x, aabb.lower.y, aabb.lower.z);
     printf("[INFO]:   Upper corner: (%.6f, %.6f, %.6f)\n", aabb.upper.x, aabb.upper.y, aabb.upper.z);
-    float width = aabb.upper.x - aabb.lower.x;
-    float height = aabb.upper.y - aabb.lower.y;
-    float depth = aabb.upper.z - aabb.lower.z;
+
     printf("[INFO]: Dimensions:\n");
-    printf("[INFO]:   Width: %.6f\n", width);
-    printf("[INFO]:   Height: %.6f\n", height);
-    printf("[INFO]:   Depth: %.6f\n", depth);
-    float volume = width * height * depth;
-    printf("[INFO]:   Volume: %.6f\n", volume);
+    printf("[INFO]:   Width       : %.6f\n", width);
+    printf("[INFO]:   Height      : %.6f\n", height);
+    printf("[INFO]:   Depth       : %.6f\n", depth);
+
+    printf("[INFO]:   Volume      : %.6f\n", volume);
+    printf("[INFO]:   Radius      : %.6f\n", lengthMax * 0.5f);
     printf("\n");
 }
 
