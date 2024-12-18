@@ -87,6 +87,14 @@ struct AABB {
   float4 max;
 };
 
+struct merge_aabb {
+    __device__
+    lbvh::aabb<float> operator()(const lbvh::aabb<float>& a, const lbvh::aabb<float>& b) const {
+        return lbvh::merge(a, b);
+    }
+};
+
+
 __host__ __device__ float length(const float3 &v) {
   return sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
 }
@@ -1126,6 +1134,31 @@ __global__ void rayTracingKernelExplorationOptimized2(
 //**************************************************************************************************************
 //--------------------------------------------------------------------------------------------------------------
 
+void showInformationAABB(const lbvh::aabb<float>& aabb) {
+    printf("\n");
+    printf("[INFO]: Bounding box:\n");
+    printf("[INFO]:   Lower corner: (%.6f, %.6f, %.6f)\n", aabb.lower.x, aabb.lower.y, aabb.lower.z);
+    printf("[INFO]:   Upper corner: (%.6f, %.6f, %.6f)\n", aabb.upper.x, aabb.upper.y, aabb.upper.z);
+    float width = aabb.upper.x - aabb.lower.x;
+    float height = aabb.upper.y - aabb.lower.y;
+    float depth = aabb.upper.z - aabb.lower.z;
+    printf("[INFO]: Dimensions:\n");
+    printf("[INFO]:   Width: %.6f\n", width);
+    printf("[INFO]:   Height: %.6f\n", height);
+    printf("[INFO]:   Depth: %.6f\n", depth);
+    float volume = width * height * depth;
+    printf("[INFO]:   Volume: %.6f\n", volume);
+    printf("\n");
+}
+
+//--------------------------------------------------------------------------------------------------------------
+//**************************************************************************************************************
+
+
+
+//**************************************************************************************************************
+//--------------------------------------------------------------------------------------------------------------
+
 bool loadOBJTriangle(const std::string &filename,
                      std::vector<Triangle> &triangles, const int &id) {
   std::ifstream file(filename);
@@ -1213,6 +1246,19 @@ void Test002(int mode) {
 
   // const auto bvh_dev = bvh.get_device_repr();
   t_end_0 = std::chrono::steady_clock::now();
+
+
+  // Computes the bounding box of all objects in the space to define the workspace.
+  lbvh::aabb<float> global_aabb = thrust::reduce(
+      thrust::device,
+      bvh_dev.aabbs,
+      bvh_dev.aabbs + bvh_dev.num_objects,
+      lbvh::aabb<float>(),
+      merge_aabb()
+  );
+  showInformationAABB(global_aabb);
+  //
+
 
   // Building rays
 
@@ -1507,14 +1553,15 @@ int main(int argc, char *argv[]) {
   Test002(3);
   std::cout << "\n";
 
-  //std::cout << "[INFO]: Methode 2 again\n";
-  //Test002(3);
-  //std::cout << "\n";
+  std::cout << "[INFO]: Methode 2 again\n";
+  Test002(3);
+  std::cout << "\n";
 
-
+/*
   std::cout << "[INFO]: Methode 4\n";
   Test002(4);
   std::cout << "\n";
+  */
 
   std::cout << "[INFO]: WELL DONE :-) FINISHED !\n";
   return 0;
