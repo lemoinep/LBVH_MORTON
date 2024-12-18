@@ -94,6 +94,17 @@ struct merge_aabb {
     }
 };
 
+struct CenterGlobalSpaceBox {
+    float4 min;
+    float4 max;
+    float width;
+    float height;
+    float depth;
+    float radius;
+    float volume;
+    float4 position;
+};
+
 
 __host__ __device__ float length(const float3 &v) {
   return sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -919,7 +930,7 @@ template <typename T, typename U>
 __global__ void
 rayTracingKernelExplorationOptimized(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
                                     HitRay *d_HitRays, int numRays,
-                                    float4 *directions) {
+                                    float4 *directions,const CenterGlobalSpaceBox* d_gBox) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= numRays)
     return;
@@ -987,6 +998,7 @@ rayTracingKernelExplorationOptimized(lbvh::bvh_device<T, U> bvh_dev, Ray *rays,
     float halfOpeningAngle = INFINITY;
     float4 currentPosition;
     float4 currentPositionLast = currentPosition;
+    float distRayOriTogBoxCenter=length(ray.origin-d_gBox->position);
     for (int iteration = 0; iteration < maxIterations; ++iteration) {
       currentPositionLast = currentPosition;
       currentPosition = ray.origin + ray.direction * delta;
@@ -1050,7 +1062,7 @@ __device__ void updateHitResults(HitRay &hitRay, unsigned int triangleIndex, flo
 
 template <typename T, typename U>
 __global__ void rayTracingKernelExplorationOptimized2(
-    lbvh::bvh_device<T, U> bvh_dev, Ray *rays, HitRay *d_HitRays, int numRays, float4 *directions) {
+    lbvh::bvh_device<T, U> bvh_dev, Ray *rays, HitRay *d_HitRays, int numRays, float4 *directions,const CenterGlobalSpaceBox* d_gBox) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= numRays) return;
 
@@ -1096,6 +1108,7 @@ __global__ void rayTracingKernelExplorationOptimized2(
     if (isViewInfo) printf("in step2-level1\n");
     float delta = epsilon;
     float4 currentPosition, lastPosition = ray.origin;
+    float distRayOriTogBoxCenter=length(ray.origin-d_gBox->position);
 
     for (int iteration = 0; iteration < maxIterations; ++iteration) {
         currentPosition = ray.origin + ray.direction * delta;
@@ -1134,18 +1147,24 @@ __global__ void rayTracingKernelExplorationOptimized2(
 //**************************************************************************************************************
 //--------------------------------------------------------------------------------------------------------------
 
-void showInformationAABB(const lbvh::aabb<float>& aabb) {
+__host__ __device__ void showInformationAABB(const lbvh::aabb<float>& aabb) {
 
     float width = aabb.upper.x - aabb.lower.x;
     float height = aabb.upper.y - aabb.lower.y;
     float depth = aabb.upper.z - aabb.lower.z;
     float lengthMax=length(aabb.upper-aabb.lower);
     float volume = width * height * depth;
+    float4 position = make_float4((aabb.upper.x + aabb.lower.x) * 0.5f,
+                                  (aabb.upper.y + aabb.lower.y) * 0.5f,
+                                  (aabb.upper.z + aabb.lower.z) * 0.5f,
+                                  0.0f);
 
     printf("\n");
     printf("[INFO]: Bounding box:\n");
     printf("[INFO]:   Lower corner: (%.6f, %.6f, %.6f)\n", aabb.lower.x, aabb.lower.y, aabb.lower.z);
     printf("[INFO]:   Upper corner: (%.6f, %.6f, %.6f)\n", aabb.upper.x, aabb.upper.y, aabb.upper.z);
+
+    printf("[INFO]: Position      : <%f,%f,%f>\n",position.x,position.y,position.z);
 
     printf("[INFO]: Dimensions:\n");
     printf("[INFO]:   Width       : %.6f\n", width);
@@ -1154,7 +1173,47 @@ void showInformationAABB(const lbvh::aabb<float>& aabb) {
 
     printf("[INFO]:   Volume      : %.6f\n", volume);
     printf("[INFO]:   Radius      : %.6f\n", lengthMax * 0.5f);
+
     printf("\n");
+}
+
+
+
+__host__ __device__ 
+void buildInformationGlobalAABB(const lbvh::aabb<float>& aabb,CenterGlobalSpaceBox& gBox) {
+    gBox.min=aabb.lower;
+    gBox.max=aabb.upper;
+    gBox.width = aabb.upper.x - aabb.lower.x;
+    gBox.height = aabb.upper.y - aabb.lower.y;
+    gBox.depth = aabb.upper.z - aabb.lower.z;
+    gBox.radius=length(aabb.upper-aabb.lower) * 0.5f;
+    gBox.volume = gBox.width * gBox.height * gBox.depth;
+    gBox.position = make_float4((aabb.upper.x + aabb.lower.x) * 0.5f,
+                                  (aabb.upper.y + aabb.lower.y) * 0.5f,
+                                  (aabb.upper.z + aabb.lower.z) * 0.5f,
+                                  0.0f);
+}
+
+__host__ __device__ 
+void printGlobalBoxInfo(const CenterGlobalSpaceBox& gBox) {
+    printf("\n");
+    printf("[INFO]: Bounding box:\n");
+    printf("[INFO]:   Lower corner: <%.3f, %.3f, %.3f>\n", gBox.min.x, gBox.min.y, gBox.min.z);
+    printf("[INFO]:   Upper corner: <%.3f, %.3f, %.3f>\n", gBox.max.x, gBox.max.y, gBox.max.z);
+    printf("[INFO]: Position      : <%.3f, %.3f, %.3f>\n", gBox.position.x, gBox.position.y, gBox.position.z);  
+    printf("[INFO]: Dimensions:\n");  
+    printf("[INFO]:   Width       : %.6f\n", gBox.width);
+    printf("[INFO]:   Height      : %.6f\n", gBox.height);
+    printf("[INFO]:   Depth       : %.6f\n", gBox.depth);
+    printf("[INFO]:   Volume      : %.6f\n", gBox.volume);
+    printf("[INFO]:   Radius      : %.6f\n", gBox.radius);
+    printf("\n");
+}
+
+__global__ void printGlobalBoxInfoKernel(CenterGlobalSpaceBox* d_gBox) {
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+        printGlobalBoxInfo(*d_gBox);
+    }
 }
 
 //--------------------------------------------------------------------------------------------------------------
@@ -1262,7 +1321,18 @@ void Test002(int mode) {
       lbvh::aabb<float>(),
       merge_aabb()
   );
-  showInformationAABB(global_aabb);
+  //showInformationAABB(global_aabb);
+  CenterGlobalSpaceBox h_gBox;
+  CenterGlobalSpaceBox* d_gBox;
+  buildInformationGlobalAABB(global_aabb,h_gBox);
+  hipMalloc((void**)&d_gBox, sizeof(CenterGlobalSpaceBox));
+  hipMemcpy(d_gBox, &h_gBox, sizeof(CenterGlobalSpaceBox), hipMemcpyHostToDevice);
+
+  printGlobalBoxInfo(h_gBox);
+  //printGlobalBoxInfoKernel<<<1, 1>>>(d_gBox);
+  //hipDeviceSynchronize();
+
+
   //
 
 
@@ -1427,7 +1497,7 @@ void Test002(int mode) {
     
     rayTracingKernelExplorationOptimized<float, Triangle>
         <<<blocksPerGrid, threadsPerBlock>>>(bvh_dev, d_rays, d_hitRays,
-                                             numRays, d_directions);
+                                             numRays, d_directions,d_gBox);
 
     hipFree( d_directions );
     delete [] h_directions;
@@ -1445,7 +1515,7 @@ void Test002(int mode) {
     
     rayTracingKernelExplorationOptimized2<float, Triangle>
         <<<blocksPerGrid, threadsPerBlock>>>(bvh_dev, d_rays, d_hitRays,
-                                             numRays, d_directions);
+                                             numRays, d_directions,d_gBox);
 
     hipFree( d_directions );
     delete [] h_directions;
@@ -1513,6 +1583,7 @@ void Test002(int mode) {
 
   hipFree(d_rays);
   hipFree(d_hitRays);
+  hipFree(d_gBox);
   h_rays.clear();
   h_hitRays.clear();
 }
@@ -1559,15 +1630,16 @@ int main(int argc, char *argv[]) {
   Test002(3);
   std::cout << "\n";
 
+/*
   std::cout << "[INFO]: Methode 2 again\n";
   Test002(3);
   std::cout << "\n";
+*/
 
-/*
+
   std::cout << "[INFO]: Methode 4\n";
   Test002(4);
   std::cout << "\n";
-  */
 
   std::cout << "[INFO]: WELL DONE :-) FINISHED !\n";
   return 0;
