@@ -88,8 +88,8 @@ struct AABB {
 };
 
 struct merge_aabb {
-  __device__ lbvh::aabb<float> operator()(const lbvh::aabb<float> &a,
-                                          const lbvh::aabb<float> &b) const {
+  __device__ __inline__ lbvh::aabb<float>
+  operator()(const lbvh::aabb<float> &a, const lbvh::aabb<float> &b) const {
     return lbvh::merge(a, b);
   }
 };
@@ -105,15 +105,16 @@ struct CenterGlobalSpaceBox {
   float4 position;
 };
 
-__host__ __device__ float length(const float3 &v) {
+__host__ __device__ __inline__ float length(const float3 &v) {
   return sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
 }
 
-__host__ __device__ float length(const float4 &v) {
+__host__ __device__ __inline__ float length(const float4 &v) {
   return sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
 }
 
-__host__ __device__ float angleScalar(const float4 v1, const float4 v2) {
+__host__ __device__ __inline__ float angleScalar(const float4 v1,
+                                                 const float4 v2) {
   float p = (v1.x * v2.x) + (v1.y * v2.y) + (v1.z * v2.z);
   float n1 = sqrt(v1.x * v1.x + v1.y * v1.y + v1.z * v1.z);
   float n2 = sqrt(v2.x * v2.x + v2.y * v2.y + v2.z * v2.z);
@@ -126,8 +127,8 @@ __host__ __device__ float angleScalar(const float4 v1, const float4 v2) {
   return 0.0f;
 }
 
-__host__ __device__ float calculateHalfOpeningAngle(const Triangle &triangle,
-                                                    const float4 &origin) {
+__host__ __device__ __inline__ float
+calculateHalfOpeningAngle(const Triangle &triangle, const float4 &origin) {
   // This function will be used to speed up the calculations and will adapt the
   // limit angle of the sameDirection function
   float4 barycenter = {(triangle.v1.x + triangle.v2.x + triangle.v3.x) / 3.0f,
@@ -157,7 +158,7 @@ __host__ __device__ float calculateHalfOpeningAngle(const Triangle &triangle,
   return halfOpeningAngle;
 }
 
-__host__ __device__ bool
+__host__ __device__ __inline__ bool
 sameDirection(const Triangle &tri, const Ray &ray,
               const float &angleLim) { // To be modified soon according to the
                                        // radius of the triangle object
@@ -171,8 +172,8 @@ sameDirection(const Triangle &tri, const Ray &ray,
   return (angle1 <= angleLim) && (angle1 <= angle2);
 }
 
-__host__ __device__ bool sameDirectionTest(const Triangle &tri, const Ray &ray,
-                                           const float &angleLim) {
+__host__ __device__ __inline__ bool
+sameDirectionTest(const Triangle &tri, const Ray &ray, const float &angleLim) {
   float4 dT1 = tri.v1 - ray.origin;
   float4 dT2 = tri.v2 - ray.origin;
   float4 dT3 = tri.v3 - ray.origin;
@@ -942,7 +943,7 @@ __global__ void rayTracingKernelExploration002(lbvh::bvh_device<T, U> bvh_dev,
 //**************************************************************************************************************
 //--------------------------------------------------------------------------------------------------------------
 
-__host__ __device__ void initializeDirections(float4 *directions) {
+__host__ __device__ __inline__ void initializeDirections(float4 *directions) {
   const float c1 = 1.0f / sqrt(3.0f);
   const float4 predefinedDirections[14] = {
       make_float4(1.0f, 0.0f, 0.0f, 0.0f), make_float4(-1.0f, 0.0f, 0.0f, 0.0f),
@@ -1030,13 +1031,40 @@ __global__ void rayTracingKernelExplorationOptimized(
   if (step == 2) {
     if (isViewInfo)
       printf("in step2-level1\n");
+
+    float4 intersectionPointWithSphereScene;
+    float distanceSphereScene = INFINITY;
+    bool isSceneIntersection = raySphereIntersection(
+        ray.origin, ray.direction, d_gBox->position, d_gBox->radius,
+        intersectionPointWithSphereScene, distanceSphereScene);
+
+    if (isViewInfo) {
+      printf("isSceneIntersection=%i\n", isSceneIntersection);
+      printf("  dist=%f\n", distanceSphereScene);
+      printf("  position=<%f,%f,%f>\n", intersectionPointWithSphereScene.x,
+             intersectionPointWithSphereScene.y,
+             intersectionPointWithSphereScene.z);
+    }
+
+    if (isSceneIntersection == 0)
+      return; // no objects are in this direction
+
+    float distRayOriTogBoxCenter = length(ray.origin - d_gBox->position);
+    float rfar = INFINITY;
+    if (distRayOriTogBoxCenter < 2.0f * d_gBox->radius) {
+      rfar = 2.0f * d_gBox->radius;
+    } else {
+      rfar = 2.0f * distRayOriTogBoxCenter;
+    }
+
     float dp = 0.0f;
     float angleToTriangle = INFINITY;
     float distanceToTriangle = 0.0f;
     float halfOpeningAngle = INFINITY;
+    float inActivationAngle = INFINITY;
     float4 currentPosition;
     float4 currentPositionLast = currentPosition;
-    float distRayOriTogBoxCenter = length(ray.origin - d_gBox->position);
+
     for (int iteration = 0; iteration < maxIterations; ++iteration) {
       currentPositionLast = currentPosition;
       currentPosition = ray.origin + ray.direction * delta;
@@ -1057,7 +1085,10 @@ __global__ void rayTracingKernelExplorationOptimized(
 
         angleToTriangle = fabs(angleScalar(directionToTriangle, ray.direction));
         distanceToTriangle = length(directionToTriangle);
-        halfOpeningAngle = calculateHalfOpeningAngle(hitTriangle, ray.origin);
+        halfOpeningAngle =
+            calculateHalfOpeningAngle(hitTriangle, currentPosition);
+        inActivationAngle =
+            halfOpeningAngle - angleToTriangle - angleToTriangleLim;
 
         // if (halfOpeningAngle > 0.01f) { // Close object check
         if (rayTriangleIntersect(ray, hitTriangle, t)) {
@@ -1079,6 +1110,13 @@ __global__ void rayTracingKernelExplorationOptimized(
         delta += distanceToTriangle * 0.75f + epsilon;
       }
 
+      /*
+            if (inActivationAngle > 0.0f) {
+              // delta += epsilon * exp(iteration*0.25f);
+              delta += distanceToTriangle * 0.75f + epsilon;
+            }
+      */
+
     } // END FOR
   }
 }
@@ -1089,9 +1127,10 @@ __global__ void rayTracingKernelExplorationOptimized(
 //**************************************************************************************************************
 //--------------------------------------------------------------------------------------------------------------
 
-__device__ void updateHitResults(HitRay &hitRay, unsigned int triangleIndex,
-                                 float t, const Ray &ray,
-                                 const Triangle &hitTriangle) {
+__device__ __inline__ void updateHitResults(HitRay &hitRay,
+                                            unsigned int triangleIndex, float t,
+                                            const Ray &ray,
+                                            const Triangle &hitTriangle) {
   float4 hit_point = ray.origin + ray.direction * t;
   hitRay.hitResults = triangleIndex;
   hitRay.distanceResults = t;
@@ -1205,6 +1244,11 @@ __global__ void rayTracingKernelExplorationOptimized2(
           fabs(angleScalar(directionToTriangle, ray.direction));
       float distanceToTriangle = length(directionToTriangle);
 
+      float halfOpeningAngle =
+          calculateHalfOpeningAngle(hitTriangle, currentPosition);
+      float inActivationAngle = inActivationAngle =
+          halfOpeningAngle - angleToTriangle - angleToTriangleLim;
+
       if (rayTriangleIntersect(ray, hitTriangle, t)) {
         if (isViewInfo)
           printf("in step2-level2 it=%i\n", iteration);
@@ -1216,6 +1260,12 @@ __global__ void rayTracingKernelExplorationOptimized2(
       delta += (angleToTriangle > angleToTriangleLim)
                    ? (distanceToTriangle * 0.75f + epsilon)
                    : epsilon;
+
+      /*
+            delta += (inActivationAngle > 0.0f)
+                         ? (distanceToTriangle * 0.75f + epsilon)
+                         : epsilon;
+      */
     } else {
       delta += epsilon;
     }
@@ -1228,7 +1278,8 @@ __global__ void rayTracingKernelExplorationOptimized2(
 //**************************************************************************************************************
 //--------------------------------------------------------------------------------------------------------------
 
-__host__ __device__ void showInformationAABB(const lbvh::aabb<float> &aabb) {
+__host__ __device__ __inline__ void
+showInformationAABB(const lbvh::aabb<float> &aabb) {
 
   float width = aabb.upper.x - aabb.lower.x;
   float height = aabb.upper.y - aabb.lower.y;
@@ -1513,20 +1564,21 @@ void Test002(int mode) {
   // h_rays[0].origin = make_float4(4.5f, 0.4f, 0.5, 1.0f);
   //  h_rays[0].origin = make_float4(0.8f, 0.7f, 0.7f, 1.0f);
 
-  // h_rays[0].origin = make_float4(0.5f, 0.5f, 0.5, 1.0f);
+  h_rays[0].origin = make_float4(0.5f, 0.5f, 0.5, 1.0f);
 
   // h_rays[0].origin = make_float4(0.9f, 0.9f, 0.9, 1.0f);
   // h_rays[0].origin = make_float4(0.9f, 0.9f, 1.0, 1.0f);
 
   // h_rays[0].origin = make_float4(1.5f, 0.0f, 0.0, 1.0f);
 
-  h_rays[0].origin = make_float4(-15.5f, 0.5f, 0.5, 1.0f);
+  // h_rays[0].origin = make_float4(-15.5f, 0.5f, 0.5, 1.0f);
 
   // h_rays[0].origin = make_float4(2.75f, 0.0f, 0.0, 1.0f);
 
-  //h_rays[0].origin = make_float4(5.6f, 0.0f, 0.0, 1.0f);
+  // h_rays[0].origin = make_float4(5.6f, 0.0f, 0.0, 1.0f);
 
-  //h_rays[0].direction = make_float4(1.0f, 0.0f, 0.0f, 0.0f);
+  h_rays[0].direction = make_float4(1.0f, 0.0f, 0.0f, 0.0f);
+  h_rays[0].direction = make_float4(-1.0f, 0.0f, 0.0f, 0.0f);
 
   normalizeRayDirection(h_rays[0]);
 
