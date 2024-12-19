@@ -1127,6 +1127,24 @@ __global__ void rayTracingKernelExplorationOptimized(
 //**************************************************************************************************************
 //--------------------------------------------------------------------------------------------------------------
 
+__device__ __inline__ bool
+checkOverlap(const float4 &observer, const float4 &obj1, const float &radius1,
+             const float4 &obj2, const float &radius2) {
+  float4 diff1 = make_float4(obj1.x - observer.x, obj1.y - observer.y,
+                             obj1.z - observer.z, 0.0f);
+  float4 diff2 = make_float4(obj2.x - observer.x, obj2.y - observer.y,
+                             obj2.z - observer.z, 0.0f);
+  float dist1 =
+      sqrtf(diff1.x * diff1.x + diff1.y * diff1.y + diff1.z * diff1.z);
+  float dist2 =
+      sqrtf(diff2.x * diff2.x + diff2.y * diff2.y + diff2.z * diff2.z);
+  float angle1 = atan2f(radius1, dist1);
+  float angle2 = atan2f(radius2, dist2);
+  float dotProduct = diff1.x * diff2.x + diff1.y * diff2.y + diff1.z * diff2.z;
+  float angleBetween = acosf(dotProduct / (dist1 * dist2));
+  return angleBetween < (angle1 + angle2);
+}
+
 __device__ __inline__ void updateHitResults(HitRay &hitRay,
                                             unsigned int triangleIndex, float t,
                                             const Ray &ray,
@@ -1220,6 +1238,11 @@ __global__ void rayTracingKernelExplorationOptimized2(
     rfar = 2.0f * distRayOriTogBoxCenter;
   }
 
+  float angleToTriangle;
+  float distanceToTriangle;
+  float halfOpeningAngle;
+  float inActivationAngle;
+
   for (int iteration = 0; iteration < maxIterations; ++iteration) {
     currentPosition = ray.origin + ray.direction * delta;
     if (currentPosition == lastPosition) {
@@ -1236,18 +1259,38 @@ __global__ void rayTracingKernelExplorationOptimized2(
         bvh_dev, lbvh::nearest(currentPosition), distance_calculator());
     if (nearestTriangleIndex.first != 0xFFFFFFFF) {
       const Triangle &hitTriangle = bvh_dev.objects[nearestTriangleIndex.first];
-      float4 directionToTriangle =
-          ((hitTriangle.v1 + hitTriangle.v2 + hitTriangle.v3) / 3.0f) -
-          ray.origin;
 
-      float angleToTriangle =
-          fabs(angleScalar(directionToTriangle, ray.direction));
-      float distanceToTriangle = length(directionToTriangle);
+      // if (isViewInfo)
+      //     printf("in step2 num triangle=%i\n",nearestTriangleIndex.first);
 
-      float halfOpeningAngle =
+      float4 positionToTriangle =
+          (hitTriangle.v1 + hitTriangle.v2 + hitTriangle.v3) / 3.0f;
+      float4 directionToTriangle = positionToTriangle - currentPosition;
+      distanceToTriangle = length(directionToTriangle);
+
+      angleToTriangle = fabs(angleScalar(directionToTriangle, ray.direction));
+
+      halfOpeningAngle =
           calculateHalfOpeningAngle(hitTriangle, currentPosition);
-      float inActivationAngle = inActivationAngle =
-          halfOpeningAngle - angleToTriangle - angleToTriangleLim;
+
+      inActivationAngle =
+          halfOpeningAngle - (angleToTriangle - angleToTriangleLim);
+
+      /*
+            printf("halfOpeningAngle= %f angleToTriangle=%f inActivationAngle=%f
+         num triangle=%i\n", halfOpeningAngle, angleToTriangle,
+         inActivationAngle,nearestTriangleIndex.first);
+      */
+
+      /*
+      if (checkOverlap(currentPosition - currentPosition, directionToTriangle,
+                       halfOpeningAngle, ray.direction * distanceToTriangle,
+                       angleToTriangleLim)) {
+        printf("Overlap TRUE num triangle=%i\n", nearestTriangleIndex.first);
+      } else {
+        printf("Overlap FALSE num triangle=%i\n", nearestTriangleIndex.first);
+      }
+      */
 
       if (rayTriangleIntersect(ray, hitTriangle, t)) {
         if (isViewInfo)
@@ -1261,11 +1304,6 @@ __global__ void rayTracingKernelExplorationOptimized2(
                    ? (distanceToTriangle * 0.75f + epsilon)
                    : epsilon;
 
-      /*
-            delta += (inActivationAngle > 0.0f)
-                         ? (distanceToTriangle * 0.75f + epsilon)
-                         : epsilon;
-      */
     } else {
       delta += epsilon;
     }
@@ -1737,7 +1775,45 @@ void runGPU() {
             << milliseconds1 << " ms with hip chrono\n";
 }
 
+void testCheckOverlap() {
+  // Test case 1: Objects that clearly overlap
+  float4 observer = {0.0f, 0.0f, 0.0f, 0.0f};
+  float4 obj1 = {1.0f, 0.0f, 0.0f, 0.0f};
+  float radius1 = 0.5f;
+  float4 obj2 = {2.0f, 0.0f, 0.0f, 0.0f};
+  float radius2 = 0.6f;
+
+  assert(checkOverlap(observer, obj1, radius1, obj2, radius2) == true);
+  std::cout << "Test 1 passed: Objects that overlap\n";
+
+  // Test case 2: Objects that do not overlap
+  obj2 = {3.0f, 0.0f, 0.0f, 0.0f};
+  radius2 = 0.1f;
+
+  assert(checkOverlap(observer, obj1, radius1, obj2, radius2) == false);
+  std::cout << "Test 2 passed: Objects that do not overlap\n";
+
+  // Test case 3: Objects that just touch
+  obj2 = {2.0f, 0.0f, 0.0f, 0.0f};
+  radius2 = 0.5f;
+
+  assert(checkOverlap(observer, obj1, radius1, obj2, radius2) == true);
+  std::cout << "Test 3 passed: Objects that just touch\n";
+
+  // Test Case 4: Objects in different directions
+  obj1 = {1.0f, 0.0f, 0.0f, 0.0f};
+  obj2 = {0.0f, 1.0f, 0.0f, 0.0f};
+  radius1 = radius2 = 0.1f;
+
+  assert(checkOverlap(observer, obj1, radius1, obj2, radius2) == false);
+  std::cout << "Test 4 passed: Objects in different directions\n";
+
+  std::cout << "All tests passed!\n";
+}
+
 int main(int argc, char *argv[]) {
+
+  //testCheckOverlap();
 
   bool isPreheating = false;
 
