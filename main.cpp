@@ -1636,6 +1636,12 @@ void Test002(int mode) {
   h_rays[0].direction = make_float4(1.0f, 0.0f, 0.0f, 0.0f);
   h_rays[0].direction = make_float4(-1.0f, 0.0f, 0.0f, 0.0f);
 
+  h_rays[0].direction = make_float4(0.0f, -1.0f, 0.0f, 0.0f);
+  h_rays[0].direction = make_float4(0.0f,  1.0f, 0.0f, 0.0f);
+
+  h_rays[0].direction = make_float4(0.0f, 0.0f, -1.0f, 0.0f);
+  h_rays[0].direction = make_float4(0.0f, 0.0f,  1.0f, 0.0f);
+
   normalizeRayDirection(h_rays[0]);
 
   // h_rays[0].origin = make_float4(0.5f, 0.5f, 0.5, 1.0f);
