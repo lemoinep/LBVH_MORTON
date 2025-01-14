@@ -1276,21 +1276,39 @@ __global__ void rayTracingKernelExplorationOptimized2(
       inActivationAngle =
           halfOpeningAngle - (angleToTriangle - angleToTriangleLim);
 
-      /*
-            printf("halfOpeningAngle= %f angleToTriangle=%f inActivationAngle=%f
-         num triangle=%i\n", halfOpeningAngle, angleToTriangle,
-         inActivationAngle,nearestTriangleIndex.first);
-      */
+      
+      //printf("halfOpeningAngle= %f angleToTriangle=%f inActivationAngle=%f num triangle=%i\n", halfOpeningAngle, angleToTriangle,inActivationAngle,nearestTriangleIndex.first);
+      float4 positionInDir = ray.direction * (distanceToTriangle-0.001f);
 
-      /*
-      if (checkOverlap(currentPosition - currentPosition, directionToTriangle,
-                       halfOpeningAngle, ray.direction * distanceToTriangle,
-                       angleToTriangleLim)) {
-        printf("Overlap TRUE num triangle=%i\n", nearestTriangleIndex.first);
+      if (1==0) {
+        printf("\n");
+        printf("currentPosition     = <%f %f %f>\n",currentPosition.x,currentPosition.y,currentPosition.z);
+        printf("positionToTriangle  = <%f %f %f>\n",positionToTriangle.x,positionToTriangle.y,positionToTriangle.z);
+        printf("positionInDir       = <%f %f %f>\n",positionInDir.x,positionInDir.y,positionInDir.z);
+        printf("directionToTriangle = <%f %f %f>\n",directionToTriangle.x,directionToTriangle.y,directionToTriangle.z);
+
+        if (checkOverlap({0.0f, 0.0f, 0.0f, 0.0f}, 
+                        directionToTriangle,halfOpeningAngle, 
+                        positionInDir,angleToTriangleLim))
+        {
+          printf("Overlap TRUE num triangle=%i\n", nearestTriangleIndex.first);
+        } else {
+          printf("Overlap FALSE num triangle=%i\n", nearestTriangleIndex.first);
+        }
+    }
+
+/*
+      if (checkOverlap({0.0f, 0.0f, 0.0f, 0.0f}, 
+                       {10.0f, 0.0f, 1.0f, 0.0f},
+                       2, 
+                       {9.0f, 0.0f, 1.0f, 0.0f},
+                       10))
+      {
+        printf("Overlap TRUE num triangle 2\n");
       } else {
-        printf("Overlap FALSE num triangle=%i\n", nearestTriangleIndex.first);
+        printf("Overlap FALSE num triangle 2\n");
       }
-      */
+*/      
 
       if (rayTriangleIntersect(ray, hitTriangle, t)) {
         if (isViewInfo)
@@ -1836,7 +1854,9 @@ int main(int argc, char *argv[]) {
     std::cout << "[INFO]: Methode 2 again\n";
     Test002(3);
     std::cout << "\n";
-  */
+*/
+
+
 
   std::cout << "[INFO]: Methode 4\n";
   Test002(4);
