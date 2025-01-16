@@ -1797,11 +1797,17 @@ void Test002(int mode) {
   roctxRangePop();
 }
 
-__global__ void onKernel(float4 *nothing) {
+__global__ void onKernelNothing(float4 *nothing) {
   // nothing void
 }
 
-void runGPU() {
+void runPreheatingGPU(int numDevice) {
+
+  int nbDevices = 0;
+  hipGetDeviceCount( &nbDevices );
+  if ( numDevice > nbDevices ) numDevice = 0;
+  hipSetDevice( numDevice );
+
   hipEvent_t start1, stop1;
   hipEventCreate(&start1);
   hipEventCreate(&stop1);
@@ -1809,7 +1815,7 @@ void runGPU() {
 
   float4 *d_nothing;
   hipMalloc(&d_nothing, 14 * sizeof(float4));
-  onKernel<<<1, 1>>>(d_nothing);
+  onKernelNothing<<<1, 1>>>(d_nothing);
 
   hipEventRecord(stop1);
   hipEventSynchronize(stop1);
@@ -1878,7 +1884,7 @@ int main(int argc, char *argv[]) {
 
   std::cout << "\n";
   if (isPreheating)
-    runGPU();
+    runPreheatingGPU(0);
   std::cout << "\n";
 
   /*
