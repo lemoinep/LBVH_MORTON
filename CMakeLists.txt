@@ -33,6 +33,7 @@ include_directories(/opt/rocm-5.7.2/hip/include)
 include_directories(/opt/rocm-5.7.2/hipblas/include)
 include_directories(/opt/rocm-5.7.2/hipblas/lib)
 #include_directories(/nvme0/lemoinep/soft/rocThrust/include)
+include_directories(/opt/rocm-5.7.2/roctracer/include)
 
 list(APPEND CMAKE_PREFIX_PATH /opt/rocm-5.7.2 /opt/rocm-5.7.2)
 
@@ -105,11 +106,21 @@ endif()
 if(TRUE)
    find_package(rocthrust REQUIRED CONFIG PATHS "/nvme0/lemoinep/soft/rocThrust")
    if (rocthrust_FOUND)
-      message("{rocthrust_LIBRARIES}") 
+      message("{rocthrust_LIBRARIES ON}") 
       set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} "/nvme0/lemoinep/soft/rocThrust/include")
       list(APPEND include_dirs "/nvme0/lemoinep/soft/rocThrust/include")
    else()
       message(FATAL_ERROR "Could not find rocThrust")     
+   endif()
+endif()
+
+
+if(TRUE)
+    find_package(rccl REQUIRED)
+    if (rccl_FOUND)
+      message("{rccl_LIBRARIES ON}") 
+   else()
+      message(FATAL_ERROR "Could not find rccl")     
    endif()
 endif()
 
@@ -137,7 +148,9 @@ target_link_libraries(main
         ${BLAS_LIBRARIES}
         ${LAPACK_LIBRARIES}
         roc::rocthrust
+        roc::rccl
     PRIVATE hipblas
+    PRIVATE /opt/rocm-5.7.2/lib/libroctx64.so
 )
 
 
@@ -156,7 +169,9 @@ set_source_files_properties(main.cpp PROPERTIES LANGUAGE ${GPU_RUNTIME})
     #PRIVATE
         #${header_specx_dir_list}
     #PUBLIC
-    #    ${header_rocThrust_dir_list}
+        #${header_rocThrust_dir_list}
+    #PRIVATE
+        #${RCCL_INCLUDE_DIRS}
 #)
 
 

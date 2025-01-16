@@ -44,6 +44,10 @@
 #include <thrust/random.h>
 #include <thrust/transform.h>
 
+#include <roctx.h> //Scan Perf
+
+#include <rccl.h> // For multi-GPU
+
 #include "lbvh.cuh"
 //#include "lbvh/bvh.cuh"
 
@@ -1473,17 +1477,23 @@ bool loadOBJTriangle(const std::string &filename,
 
 void Test002(int mode) {
 
+  roctxRangePush("Initialisation");
+  roctxMark("Begin");
+
   std::chrono::steady_clock::time_point t_begin_0, t_begin_1;
   std::chrono::steady_clock::time_point t_end_0, t_end_1;
   long int t_laps;
 
   std::vector<Triangle> triangles;
   // Load object
+  roctxMark("Load obj");
   loadOBJTriangle("Test.obj", triangles, 1);
+  
 
   int nbTriangle = triangles.size();
 
   // Building the LBVH
+  roctxMark("Build LBVH Begin");
   t_begin_0 = std::chrono::steady_clock::now();
   // lbvh::bvh<float, Triangle, aabb_getter> bvh(triangles.begin(),
   // triangles.end(), true);
@@ -1498,9 +1508,11 @@ void Test002(int mode) {
 
   // const auto bvh_dev = bvh.get_device_repr();
   t_end_0 = std::chrono::steady_clock::now();
+  roctxMark("Build LBVH End");
 
   // Computes the bounding box of all objects in the space to define the
   // workspace.
+  roctxMark("Global Box Begin");
   lbvh::aabb<float> global_aabb = thrust::reduce(
       thrust::device, bvh_dev.aabbs, bvh_dev.aabbs + bvh_dev.num_objects,
       lbvh::aabb<float>(), merge_aabb());
@@ -1515,6 +1527,7 @@ void Test002(int mode) {
   printGlobalBoxInfo(h_gBox);
   // printGlobalBoxInfoKernel<<<1, 1>>>(d_gBox);
   // hipDeviceSynchronize();
+  roctxMark("Global Box End");
 
   //
 
@@ -1642,6 +1655,8 @@ void Test002(int mode) {
   h_rays[0].direction = make_float4(0.0f, 0.0f, -1.0f, 0.0f);
   h_rays[0].direction = make_float4(0.0f, 0.0f,  1.0f, 0.0f);
 
+  //h_rays[0].direction = make_float4(1.0f, 1.0f,  1.0f, 0.0f);
+
   normalizeRayDirection(h_rays[0]);
 
   // h_rays[0].origin = make_float4(0.5f, 0.5f, 0.5, 1.0f);
@@ -1660,6 +1675,8 @@ void Test002(int mode) {
   hipEventCreate(&start1);
   hipEventCreate(&stop1);
   hipEventRecord(start1);
+
+  roctxMark("Ray Tracing Begin");
 
   t_begin_1 = std::chrono::steady_clock::now();
   int threadsPerBlock = 512;
@@ -1719,11 +1736,13 @@ void Test002(int mode) {
   hipEventDestroy(start1);
   hipEventDestroy(stop1);
   t_end_1 = std::chrono::steady_clock::now();
+  roctxMark("Ray Tracing End");
 
   thrust::host_vector<HitRay> h_hitRays(numRays);
   hipMemcpy(h_hitRays.data(), d_hitRays, numRays * sizeof(HitRay),
             hipMemcpyDeviceToHost);
 
+  roctxMark("Debring Begin");
   std::cout << "\n";
   std::cout << "Debriefing\n";
   std::cout << "\n";
@@ -1774,6 +1793,8 @@ void Test002(int mode) {
   hipFree(d_gBox);
   h_rays.clear();
   h_hitRays.clear();
+  roctxMark("End");
+  roctxRangePop();
 }
 
 __global__ void onKernel(float4 *nothing) {
@@ -1833,6 +1854,16 @@ void testCheckOverlap() {
   std::cout << "Test 4 passed: Objects in different directions\n";
 
   std::cout << "All tests passed!\n";
+}
+
+void testRCLL()
+{
+  ncclComm_t comm;
+  ncclUniqueId id;
+  ncclGetUniqueId(&id);
+  ncclCommInitRank(&comm, 1, id, 0);
+  //...
+  ncclCommDestroy(comm);
 }
 
 int main(int argc, char *argv[]) {
