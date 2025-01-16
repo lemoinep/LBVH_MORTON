@@ -1819,6 +1819,9 @@ void runPreheatingGPU(int numDevice) {
 
   hipEventRecord(stop1);
   hipEventSynchronize(stop1);
+
+  hipFree(d_nothing);
+
   float milliseconds1 = 0;
   hipEventElapsedTime(&milliseconds1, start1, stop1);
 
@@ -1878,7 +1881,7 @@ int main(int argc, char *argv[]) {
 
   bool isPreheating = false;
 
-  if (argc > 0)
+  if (argc > 1)
     isPreheating = bool(atoi(argv[1]));
   // std::cout<<argv[1];
 
