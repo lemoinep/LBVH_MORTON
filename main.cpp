@@ -1903,7 +1903,12 @@ void testRCCL() {
 void testRCCL2() {
   std::cout << "[INFO]: Test RCCL\n";
   int nDevices;
-  hipGetDeviceCount(&nDevices);
+  hipError_t err = hipGetDeviceCount(&nDevices);
+  if (err != hipSuccess) {
+    std::cerr << "Error getting device count: " << hipGetErrorString(err)
+              << std::endl;
+    exit(1);
+  }
 
   std::vector<int> devices(nDevices);
   for (int i = 0; i < nDevices; ++i) {
@@ -1916,9 +1921,9 @@ void testRCCL2() {
   RCCL_CHECK(ncclGetUniqueId(&id));
 
   // Parallel initialization of communicators
-  ncclGroupStart();
+  RCCL_CHECK(ncclGroupStart());
   for (int i = 0; i < nDevices; ++i) {
-    hipError_t err = hipSetDevice(i);
+    err = hipSetDevice(i);
     if (err != hipSuccess) {
       std::cerr << "Error setting device " << i << ": "
                 << hipGetErrorString(err) << std::endl;
@@ -1926,19 +1931,28 @@ void testRCCL2() {
     }
     RCCL_CHECK(ncclCommInitRank(&comms[i], nDevices, id, i));
   }
+  RCCL_CHECK(ncclGroupEnd());
 
   // Synchronisation
   for (int i = 0; i < nDevices; ++i) {
-    hipSetDevice(i);
-    hipDeviceSynchronize();
+    err = hipSetDevice(i);
+    if (err != hipSuccess) {
+      std::cerr << "Error setting device " << i << ": "
+                << hipGetErrorString(err) << std::endl;
+      exit(1);
+    }
+    err = hipDeviceSynchronize();
+    if (err != hipSuccess) {
+      std::cerr << "Error synchronizing device " << i << ": "
+                << hipGetErrorString(err) << std::endl;
+      exit(1);
+    }
   }
 
   // Cleaning
   for (int i = 0; i < nDevices; ++i) {
-    ncclCommDestroy(comms[i]);
+    RCCL_CHECK(ncclCommDestroy(comms[i]));
   }
-
-  ncclGroupEnd();
 
   std::cout
       << "[INFO]: RCCL Communicators Initialized and Destroyed Successfully."
@@ -2089,7 +2103,7 @@ int main(int argc, char *argv[]) {
   Test002(4);
   std::cout << "\n";
 
-  // testRCCL2();
+  testRCCL2();
 
   // testRCCL3();
   std::cout << "[INFO]: WELL DONE :-) FINISHED !\n";
