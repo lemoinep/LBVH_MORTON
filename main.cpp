@@ -26,6 +26,7 @@
 #include <vector>
 
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -2072,6 +2073,190 @@ void testRCCL3() {
   }
 }
 
+void testRCCL4() {
+  std::cout
+      << "[INFO]: RCCL test with vector fragmentation and reconstruction\n";
+
+  // Initialization of devices
+  int nDevices;
+  hipError_t err = hipGetDeviceCount(&nDevices);
+  if (err != hipSuccess) {
+    std::cerr << "Error getting number of devices: " << hipGetErrorString(err)
+              << std::endl;
+    exit(1);
+  }
+
+  // Creation of the initial vector
+  const int vectorSize = 1000000;
+  std::vector<float> initialVector(vectorSize);
+  for (int i = 0; i < vectorSize; ++i) {
+    initialVector[i] = static_cast<float>(i);
+  }
+
+  // Calculation of fragment size
+  int fragmentSize = vectorSize / nDevices;
+  int lastFragmentSize = fragmentSize + (vectorSize % nDevices);
+
+  // Initialization of RCCL communicators
+  std::vector<ncclComm_t> comms(nDevices);
+  ncclUniqueId id;
+  RCCL_CHECK(ncclGetUniqueId(&id));
+
+  // Parallel initialization of communicators
+  RCCL_CHECK(ncclGroupStart());
+  for (int i = 0; i < nDevices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
+    RCCL_CHECK(ncclCommInitRank(&comms[i], nDevices, id, i));
+  }
+  RCCL_CHECK(ncclGroupEnd());
+
+  // Allocate and copy fragments on each GPU
+  std::vector<float *> d_fragments(nDevices);
+  for (int i = 0; i < nDevices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
+    int currentFragmentSize =
+        (i == nDevices - 1) ? lastFragmentSize : fragmentSize;
+    HIP_CHECK(hipMalloc(&d_fragments[i], currentFragmentSize * sizeof(float)));
+    HIP_CHECK(hipMemcpy(d_fragments[i], initialVector.data() + i * fragmentSize,
+                        currentFragmentSize * sizeof(float),
+                        hipMemcpyHostToDevice));
+  }
+
+  // Synchronisation
+  for (int i = 0; i < nDevices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipDeviceSynchronize());
+  }
+
+  //****
+
+  // Operations on fragments
+  std::cout << "[INFO]: Multiplying each element by 2 on GPUs\n";
+
+  for (int i = 0; i < nDevices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
+    int currentFragmentSize =
+        (i == nDevices - 1) ? lastFragmentSize : fragmentSize;
+
+    auto multiplyBy2 = [=] __host__ __device__(int idx) {
+      if (idx < currentFragmentSize) {
+        d_fragments[i][idx] *= 2.0f;
+      }
+    };
+
+    // Launching the kernel
+    const int threadsPerBlock = 256;
+    const int blocks =
+        (currentFragmentSize + threadsPerBlock - 1) / threadsPerBlock;
+    hipLaunchKernelGGL(multiplyBy2, dim3(blocks), dim3(threadsPerBlock), 0, 0,
+                       currentFragmentSize);
+
+    // Error checking after kernel launch
+    HIP_CHECK(hipGetLastError());
+  }
+
+  // Synchronization after operations
+  for (int i = 0; i < nDevices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipDeviceSynchronize());
+  }
+
+  //****
+
+  // Vector reconstruction
+  std::vector<float> reconstructedVector(vectorSize);
+  for (int i = 0; i < nDevices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
+    int currentFragmentSize =
+        (i == nDevices - 1) ? lastFragmentSize : fragmentSize;
+    HIP_CHECK(hipMemcpy(reconstructedVector.data() + i * fragmentSize,
+                        d_fragments[i], currentFragmentSize * sizeof(float),
+                        hipMemcpyDeviceToHost));
+  }
+
+  // Verification
+  bool correct = true;
+  for (int i = 0; i < vectorSize; ++i) {
+    if (initialVector[i] != reconstructedVector[i]) {
+      correct = false;
+      std::cout << "Mismatch at index " << i << ": " << reconstructedVector[i]
+                << " != " << initialVector[i] * 2.0f << std::endl;
+      break;
+    }
+  }
+
+  std::cout << "[INFO]: Vector reconstructionr "
+            << (correct ? "successful" : "failed") << std::endl;
+
+  // Displaying results
+  const int displayCount =
+      10; // Number of items to display at the start and end
+
+  std::cout << "\n[INFO]: Displaying results\n";
+
+  // Display the initial vector
+  std::cout << "Reconstructed vector (first " << displayCount
+            << " elements) :\n";
+  for (int i = 0; i < displayCount && i < vectorSize; ++i) {
+    std::cout << std::setw(10) << std::fixed << std::setprecision(2)
+              << initialVector[i] << " ";
+  }
+  std::cout << "...\n";
+
+  if (vectorSize > displayCount * 2) {
+    std::cout << "Reconstructed vector (latest " << displayCount
+              << " elements) :\n";
+    for (int i = vectorSize - displayCount; i < vectorSize; ++i) {
+      std::cout << std::setw(10) << std::fixed << std::setprecision(2)
+                << initialVector[i] << " ";
+    }
+    std::cout << "\n";
+  }
+
+  // Display the reconstructed vector
+  std::cout << "\nReconstructed vector (first " << displayCount
+            << " elements) :\n";
+  for (int i = 0; i < displayCount && i < vectorSize; ++i) {
+    std::cout << std::setw(10) << std::fixed << std::setprecision(2)
+              << reconstructedVector[i] << " ";
+  }
+  std::cout << "...\n";
+
+  if (vectorSize > displayCount * 2) {
+    std::cout << "Reconstructed vector (latest " << displayCount
+              << " elements) :\n";
+    for (int i = vectorSize - displayCount; i < vectorSize; ++i) {
+      std::cout << std::setw(10) << std::fixed << std::setprecision(2)
+                << reconstructedVector[i] << " ";
+    }
+    std::cout << "\n";
+  }
+
+  // Display some statistics
+  double sumInitial = 0, sumReconstructed = 0;
+  for (int i = 0; i < vectorSize; ++i) {
+    sumInitial += initialVector[i];
+    sumReconstructed += reconstructedVector[i];
+  }
+
+  std::cout << "\nSum of the elements of the initial vector : " << std::fixed
+            << std::setprecision(2) << sumInitial << std::endl;
+  std::cout << "Sum of the elements of the reconstructed vector : "
+            << std::fixed << std::setprecision(2) << sumReconstructed
+            << std::endl;
+  std::cout << "Report (reconstructed / initial): " << std::fixed
+            << std::setprecision(4) << (sumReconstructed / sumInitial)
+            << std::endl;
+
+  // Nettoyage
+  for (int i = 0; i < nDevices; ++i) {
+    HIP_CHECK(hipFree(d_fragments[i]));
+    RCCL_CHECK(ncclCommDestroy(comms[i]));
+  }
+
+  std::cout << "[INFO]: RCCL test completed successfully." << std::endl;
+}
+
 int main(int argc, char *argv[]) {
 
   // testCheckOverlap();
@@ -2103,9 +2288,10 @@ int main(int argc, char *argv[]) {
   Test002(4);
   std::cout << "\n";
 
-  testRCCL2();
+  // testRCCL2();
 
   // testRCCL3();
+  testRCCL4();
   std::cout << "[INFO]: WELL DONE :-) FINISHED !\n";
   return 0;
 }
