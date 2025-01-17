@@ -53,6 +53,28 @@
 
 #include <random>
 
+
+#define HIP_CHECK(cmd) do {                         \
+    hipError_t error  = cmd;                        \
+    if (error != hipSuccess) {                      \
+        printf("error: '%s'(%d) at %s:%d\n",        \
+               hipGetErrorString(error), error,     \
+               __FILE__, __LINE__);                 \
+        exit(EXIT_FAILURE);                         \
+    }                                               \
+} while(0)
+
+
+
+#define RCCL_CHECK(call) \
+    do { \
+        ncclResult_t result = call; \
+        if (result != ncclSuccess) { \
+            std::cerr << "RCCL error in " << __FILE__ << ":" << __LINE__ << ": " << ncclGetErrorString(result) << std::endl; \
+            exit(1); \
+        } \
+    } while(0)
+
 struct Ray {
   float4 origin;
   float4 direction;
@@ -1502,6 +1524,7 @@ void Test002(int mode) {
   bvh = lbvh::bvh<float, Triangle, aabb_getter>(triangles.begin(),
                                                 triangles.end(), true);
 
+  roctxMark("Build LBVH bvh_device");
   lbvh::bvh_device<float, Triangle> bvh_dev;
 
   bvh_dev = bvh.get_device_repr();
@@ -1714,10 +1737,11 @@ void Test002(int mode) {
     float4 *h_directions;
     float4 *d_directions;
     h_directions = new float4[numDirections];
+    roctxMark("CALL Ray Tracing initializeDirections");
     initializeDirections(h_directions);
     hipMalloc(&d_directions, numDirections * sizeof(float4));
     initializeDirectionsKernel<<<1, 1>>>(d_directions);
-
+    roctxMark("CALL Ray Tracing Kernel");
     rayTracingKernelExplorationOptimized2<float, Triangle>
         <<<blocksPerGrid, threadsPerBlock>>>(bvh_dev, d_rays, d_hitRays,
                                              numRays, d_directions, d_gBox);
@@ -1788,6 +1812,7 @@ void Test002(int mode) {
   std::cout << "[INFO]: Elapsed microseconds inside Ray Tracing : "
             << milliseconds1 << " ms with hip chrono\n";
 
+  roctxMark("FreeMemory");
   hipFree(d_rays);
   hipFree(d_hitRays);
   hipFree(d_gBox);
@@ -1865,7 +1890,7 @@ void testCheckOverlap() {
   std::cout << "All tests passed!\n";
 }
 
-void testRCLL()
+void testRCCL()
 {
   ncclComm_t comm;
   ncclUniqueId id;
@@ -1874,6 +1899,166 @@ void testRCLL()
   //...
   ncclCommDestroy(comm);
 }
+
+void testRCCL2()
+{
+    std::cout << "[INFO]: Test RCCL\n";
+    int nDevices;
+    hipGetDeviceCount(&nDevices);
+
+    std::vector<int> devices(nDevices);
+    for (int i = 0; i < nDevices; ++i) {
+        devices[i] = i;
+    }
+
+    // Initialization of RCCL communicators
+    std::vector<ncclComm_t> comms(nDevices);
+    ncclUniqueId id;
+    RCCL_CHECK(ncclGetUniqueId(&id));
+
+    // Parallel initialization of communicators
+    ncclGroupStart();
+    for (int i = 0; i < nDevices; ++i) {
+        hipError_t err = hipSetDevice(i); 
+        if (err != hipSuccess) {
+        std::cerr << "Error setting device " << i << ": " << hipGetErrorString(err) << std::endl;
+        exit(1);
+    }
+        RCCL_CHECK(ncclCommInitRank(&comms[i], nDevices, id, i));
+    }
+
+    // Synchronisation
+    for (int i = 0; i < nDevices; ++i) {
+        hipSetDevice(i);
+        hipDeviceSynchronize();
+    }
+
+    // Cleaning
+    for (int i = 0; i < nDevices; ++i) {
+        ncclCommDestroy(comms[i]);
+    }
+
+    ncclGroupEnd();
+
+    std::cout << "[INFO]: RCCL Communicators Initialized and Destroyed Successfully." << std::endl;
+}
+
+
+void testRCCL3()
+{
+    std::cout << "[INFO]: Test RCCL avec streaming\n";
+    int nDevices;
+    HIP_CHECK(hipGetDeviceCount(&nDevices));
+
+    std::vector<int> devices(nDevices);
+    std::vector<hipStream_t> streams(nDevices);
+    std::vector<float*> sendbuff(nDevices);
+    std::vector<float*> recvbuff(nDevices);
+    const int size = 32 * 1024 * 1024;  // 32M éléments
+	
+	std::cout << "[INFO]: OK1." << std::endl;
+
+    for (int i = 0; i < nDevices; ++i) {
+        devices[i] = i;
+        HIP_CHECK(hipSetDevice(i));
+        HIP_CHECK(hipStreamCreate(&streams[i]));
+        HIP_CHECK(hipMalloc(&sendbuff[i], size * sizeof(float)));
+        HIP_CHECK(hipMalloc(&recvbuff[i], size * sizeof(float)));
+        HIP_CHECK(hipMemset(sendbuff[i], 1, size * sizeof(float)));
+        HIP_CHECK(hipMemset(recvbuff[i], 0, size * sizeof(float)));
+    }
+	
+	std::cout << "[INFO]: OK2." << std::endl;
+
+    // Initialization of RCCL communicators
+    std::vector<ncclComm_t> comms(nDevices);
+    ncclUniqueId id;
+    RCCL_CHECK(ncclGetUniqueId(&id));
+	
+	std::cout << "[INFO]: OK3." << std::endl;
+
+    // Parallel initialization of communicators
+    RCCL_CHECK(ncclGroupStart());
+		for (int i = 0; i < nDevices; ++i) {
+			HIP_CHECK(hipSetDevice(i));
+			RCCL_CHECK(ncclCommInitRank(&comms[i], nDevices, id, i));
+		}
+    RCCL_CHECK(ncclGroupEnd());
+	
+	std::cout << "[INFO]: OK4." << std::endl;
+
+    // Perform RCCL AllReduce operation
+    RCCL_CHECK(ncclGroupStart());
+		for (int i = 0; i < nDevices; ++i) {
+			HIP_CHECK(hipSetDevice(i));
+			RCCL_CHECK(ncclAllReduce((const void*)sendbuff[i], (void*)recvbuff[i], size,
+									 ncclFloat, ncclSum, comms[i], streams[i]));
+		}
+    RCCL_CHECK(ncclGroupEnd());
+	
+	std::cout << "[INFO]: OK5." << std::endl;
+
+
+
+  // Synchronisation des streams : error 
+  for (int i = 0; i < nDevices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
+    hipError_t status = hipStreamQuery(streams[i]);
+    if (status == hipSuccess) {
+        std::cout << "Stream " << i << " completed successfully." << std::endl;
+    } else if (status == hipErrorNotReady) {
+        std::cout << "Stream " << i << " is still running." << std::endl;
+    } else {
+        std::cerr << "Error in stream " << i << ": " << hipGetErrorString(status) << std::endl;
+    }
+  }
+
+/*
+    // Synchronisation des streams : error 
+    for (int i = 0; i < nDevices; ++i) {
+        HIP_CHECK(hipSetDevice(i));
+        HIP_CHECK(hipStreamSynchronize(streams[i]));
+    }
+    */
+	
+	std::cout << "[INFO]: OK6." << std::endl;
+
+    // Vérification (sur le premier device pour simplifier)
+    HIP_CHECK(hipSetDevice(0));
+    std::vector<float> host_buffer(size);
+    HIP_CHECK(hipMemcpy(host_buffer.data(), recvbuff[0], size * sizeof(float), hipMemcpyDeviceToHost));
+	
+	std::cout << "[INFO]: OK7." << std::endl;
+    
+    bool correct = true;
+    for (int i = 0; i < size; ++i) {
+        if (host_buffer[i] != nDevices) {
+            correct = false;
+            break;
+        }
+    }
+
+    if (correct) {
+        std::cout << "[INFO]: RCCL AllReduce completed successfully." << std::endl;
+    } else {
+        std::cout << "[ERROR]: RCCL AllReduce failed." << std::endl;
+    
+	
+	std::cout << "[INFO]: OK8." << std::endl;
+
+    // Nettoyage
+    for (int i = 0; i < nDevices; ++i) {
+		//hipSetDevice(i)
+        ncclCommDestroy(comms[i]);
+        HIP_CHECK(hipFree(sendbuff[i]));
+        HIP_CHECK(hipFree(recvbuff[i]));
+        HIP_CHECK(hipStreamDestroy(streams[i]));
+    }
+
+    std::cout << "[INFO]: RCCL test completed." << std::endl;
+}
+}
+
 
 int main(int argc, char *argv[]) {
 
@@ -1908,6 +2093,10 @@ int main(int argc, char *argv[]) {
   Test002(4);
   std::cout << "\n";
 
+
+  //testRCCL2();
+
+  //testRCCL3();
   std::cout << "[INFO]: WELL DONE :-) FINISHED !\n";
   return 0;
 }
