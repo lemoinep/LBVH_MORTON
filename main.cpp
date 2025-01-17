@@ -53,27 +53,25 @@
 
 #include <random>
 
+#define HIP_CHECK(cmd)                                                         \
+  do {                                                                         \
+    hipError_t error = cmd;                                                    \
+    if (error != hipSuccess) {                                                 \
+      printf("error: '%s'(%d) at %s:%d\n", hipGetErrorString(error), error,    \
+             __FILE__, __LINE__);                                              \
+      exit(EXIT_FAILURE);                                                      \
+    }                                                                          \
+  } while (0)
 
-#define HIP_CHECK(cmd) do {                         \
-    hipError_t error  = cmd;                        \
-    if (error != hipSuccess) {                      \
-        printf("error: '%s'(%d) at %s:%d\n",        \
-               hipGetErrorString(error), error,     \
-               __FILE__, __LINE__);                 \
-        exit(EXIT_FAILURE);                         \
-    }                                               \
-} while(0)
-
-
-
-#define RCCL_CHECK(call) \
-    do { \
-        ncclResult_t result = call; \
-        if (result != ncclSuccess) { \
-            std::cerr << "RCCL error in " << __FILE__ << ":" << __LINE__ << ": " << ncclGetErrorString(result) << std::endl; \
-            exit(1); \
-        } \
-    } while(0)
+#define RCCL_CHECK(call)                                                       \
+  do {                                                                         \
+    ncclResult_t result = call;                                                \
+    if (result != ncclSuccess) {                                               \
+      std::cerr << "RCCL error in " << __FILE__ << ":" << __LINE__ << ": "     \
+                << ncclGetErrorString(result) << std::endl;                    \
+      exit(1);                                                                 \
+    }                                                                          \
+  } while (0)
 
 struct Ray {
   float4 origin;
@@ -1302,39 +1300,42 @@ __global__ void rayTracingKernelExplorationOptimized2(
       inActivationAngle =
           halfOpeningAngle - (angleToTriangle - angleToTriangleLim);
 
-      
-      //printf("halfOpeningAngle= %f angleToTriangle=%f inActivationAngle=%f num triangle=%i\n", halfOpeningAngle, angleToTriangle,inActivationAngle,nearestTriangleIndex.first);
-      float4 positionInDir = ray.direction * (distanceToTriangle-0.001f);
+      // printf("halfOpeningAngle= %f angleToTriangle=%f inActivationAngle=%f
+      // num triangle=%i\n", halfOpeningAngle,
+      // angleToTriangle,inActivationAngle,nearestTriangleIndex.first);
+      float4 positionInDir = ray.direction * (distanceToTriangle - 0.001f);
 
-      if (1==0) {
+      if (1 == 0) {
         printf("\n");
-        printf("currentPosition     = <%f %f %f>\n",currentPosition.x,currentPosition.y,currentPosition.z);
-        printf("positionToTriangle  = <%f %f %f>\n",positionToTriangle.x,positionToTriangle.y,positionToTriangle.z);
-        printf("positionInDir       = <%f %f %f>\n",positionInDir.x,positionInDir.y,positionInDir.z);
-        printf("directionToTriangle = <%f %f %f>\n",directionToTriangle.x,directionToTriangle.y,directionToTriangle.z);
+        printf("currentPosition     = <%f %f %f>\n", currentPosition.x,
+               currentPosition.y, currentPosition.z);
+        printf("positionToTriangle  = <%f %f %f>\n", positionToTriangle.x,
+               positionToTriangle.y, positionToTriangle.z);
+        printf("positionInDir       = <%f %f %f>\n", positionInDir.x,
+               positionInDir.y, positionInDir.z);
+        printf("directionToTriangle = <%f %f %f>\n", directionToTriangle.x,
+               directionToTriangle.y, directionToTriangle.z);
 
-        if (checkOverlap({0.0f, 0.0f, 0.0f, 0.0f}, 
-                        directionToTriangle,halfOpeningAngle, 
-                        positionInDir,angleToTriangleLim))
-        {
+        if (checkOverlap({0.0f, 0.0f, 0.0f, 0.0f}, directionToTriangle,
+                         halfOpeningAngle, positionInDir, angleToTriangleLim)) {
           printf("Overlap TRUE num triangle=%i\n", nearestTriangleIndex.first);
         } else {
           printf("Overlap FALSE num triangle=%i\n", nearestTriangleIndex.first);
         }
-    }
-
-/*
-      if (checkOverlap({0.0f, 0.0f, 0.0f, 0.0f}, 
-                       {10.0f, 0.0f, 1.0f, 0.0f},
-                       2, 
-                       {9.0f, 0.0f, 1.0f, 0.0f},
-                       10))
-      {
-        printf("Overlap TRUE num triangle 2\n");
-      } else {
-        printf("Overlap FALSE num triangle 2\n");
       }
-*/      
+
+      /*
+            if (checkOverlap({0.0f, 0.0f, 0.0f, 0.0f},
+                             {10.0f, 0.0f, 1.0f, 0.0f},
+                             2,
+                             {9.0f, 0.0f, 1.0f, 0.0f},
+                             10))
+            {
+              printf("Overlap TRUE num triangle 2\n");
+            } else {
+              printf("Overlap FALSE num triangle 2\n");
+            }
+      */
 
       if (rayTriangleIntersect(ray, hitTriangle, t)) {
         if (isViewInfo)
@@ -1510,7 +1511,6 @@ void Test002(int mode) {
   // Load object
   roctxMark("Load obj");
   loadOBJTriangle("Test.obj", triangles, 1);
-  
 
   int nbTriangle = triangles.size();
 
@@ -1673,12 +1673,12 @@ void Test002(int mode) {
   h_rays[0].direction = make_float4(-1.0f, 0.0f, 0.0f, 0.0f);
 
   h_rays[0].direction = make_float4(0.0f, -1.0f, 0.0f, 0.0f);
-  h_rays[0].direction = make_float4(0.0f,  1.0f, 0.0f, 0.0f);
+  h_rays[0].direction = make_float4(0.0f, 1.0f, 0.0f, 0.0f);
 
   h_rays[0].direction = make_float4(0.0f, 0.0f, -1.0f, 0.0f);
-  h_rays[0].direction = make_float4(0.0f, 0.0f,  1.0f, 0.0f);
+  h_rays[0].direction = make_float4(0.0f, 0.0f, 1.0f, 0.0f);
 
-  //h_rays[0].direction = make_float4(1.0f, 1.0f,  1.0f, 0.0f);
+  // h_rays[0].direction = make_float4(1.0f, 1.0f,  1.0f, 0.0f);
 
   normalizeRayDirection(h_rays[0]);
 
@@ -1829,9 +1829,10 @@ __global__ void onKernelNothing(float4 *nothing) {
 void runPreheatingGPU(int numDevice) {
 
   int nbDevices = 0;
-  hipGetDeviceCount( &nbDevices );
-  if ( numDevice > nbDevices ) numDevice = 0;
-  hipSetDevice( numDevice );
+  hipGetDeviceCount(&nbDevices);
+  if (numDevice > nbDevices)
+    numDevice = 0;
+  hipSetDevice(numDevice);
 
   hipEvent_t start1, stop1;
   hipEventCreate(&start1);
@@ -1890,8 +1891,7 @@ void testCheckOverlap() {
   std::cout << "All tests passed!\n";
 }
 
-void testRCCL()
-{
+void testRCCL() {
   ncclComm_t comm;
   ncclUniqueId id;
   ncclGetUniqueId(&id);
@@ -1900,169 +1900,167 @@ void testRCCL()
   ncclCommDestroy(comm);
 }
 
-void testRCCL2()
-{
-    std::cout << "[INFO]: Test RCCL\n";
-    int nDevices;
-    hipGetDeviceCount(&nDevices);
+void testRCCL2() {
+  std::cout << "[INFO]: Test RCCL\n";
+  int nDevices;
+  hipGetDeviceCount(&nDevices);
 
-    std::vector<int> devices(nDevices);
-    for (int i = 0; i < nDevices; ++i) {
-        devices[i] = i;
+  std::vector<int> devices(nDevices);
+  for (int i = 0; i < nDevices; ++i) {
+    devices[i] = i;
+  }
+
+  // Initialization of RCCL communicators
+  std::vector<ncclComm_t> comms(nDevices);
+  ncclUniqueId id;
+  RCCL_CHECK(ncclGetUniqueId(&id));
+
+  // Parallel initialization of communicators
+  ncclGroupStart();
+  for (int i = 0; i < nDevices; ++i) {
+    hipError_t err = hipSetDevice(i);
+    if (err != hipSuccess) {
+      std::cerr << "Error setting device " << i << ": "
+                << hipGetErrorString(err) << std::endl;
+      exit(1);
     }
+    RCCL_CHECK(ncclCommInitRank(&comms[i], nDevices, id, i));
+  }
 
-    // Initialization of RCCL communicators
-    std::vector<ncclComm_t> comms(nDevices);
-    ncclUniqueId id;
-    RCCL_CHECK(ncclGetUniqueId(&id));
+  // Synchronisation
+  for (int i = 0; i < nDevices; ++i) {
+    hipSetDevice(i);
+    hipDeviceSynchronize();
+  }
 
-    // Parallel initialization of communicators
-    ncclGroupStart();
-    for (int i = 0; i < nDevices; ++i) {
-        hipError_t err = hipSetDevice(i); 
-        if (err != hipSuccess) {
-        std::cerr << "Error setting device " << i << ": " << hipGetErrorString(err) << std::endl;
-        exit(1);
-    }
-        RCCL_CHECK(ncclCommInitRank(&comms[i], nDevices, id, i));
-    }
+  // Cleaning
+  for (int i = 0; i < nDevices; ++i) {
+    ncclCommDestroy(comms[i]);
+  }
 
-    // Synchronisation
-    for (int i = 0; i < nDevices; ++i) {
-        hipSetDevice(i);
-        hipDeviceSynchronize();
-    }
+  ncclGroupEnd();
 
-    // Cleaning
-    for (int i = 0; i < nDevices; ++i) {
-        ncclCommDestroy(comms[i]);
-    }
-
-    ncclGroupEnd();
-
-    std::cout << "[INFO]: RCCL Communicators Initialized and Destroyed Successfully." << std::endl;
+  std::cout
+      << "[INFO]: RCCL Communicators Initialized and Destroyed Successfully."
+      << std::endl;
 }
 
+void testRCCL3() {
+  std::cout << "[INFO]: Test RCCL avec streaming\n";
+  int nDevices;
+  HIP_CHECK(hipGetDeviceCount(&nDevices));
 
-void testRCCL3()
-{
-    std::cout << "[INFO]: Test RCCL avec streaming\n";
-    int nDevices;
-    HIP_CHECK(hipGetDeviceCount(&nDevices));
+  std::vector<int> devices(nDevices);
+  std::vector<hipStream_t> streams(nDevices);
+  std::vector<float *> sendbuff(nDevices);
+  std::vector<float *> recvbuff(nDevices);
+  const int size = 32 * 1024 * 1024; // 32M éléments
 
-    std::vector<int> devices(nDevices);
-    std::vector<hipStream_t> streams(nDevices);
-    std::vector<float*> sendbuff(nDevices);
-    std::vector<float*> recvbuff(nDevices);
-    const int size = 32 * 1024 * 1024;  // 32M éléments
-	
-	std::cout << "[INFO]: OK1." << std::endl;
+  std::cout << "[INFO]: OK1." << std::endl;
 
-    for (int i = 0; i < nDevices; ++i) {
-        devices[i] = i;
-        HIP_CHECK(hipSetDevice(i));
-        HIP_CHECK(hipStreamCreate(&streams[i]));
-        HIP_CHECK(hipMalloc(&sendbuff[i], size * sizeof(float)));
-        HIP_CHECK(hipMalloc(&recvbuff[i], size * sizeof(float)));
-        HIP_CHECK(hipMemset(sendbuff[i], 1, size * sizeof(float)));
-        HIP_CHECK(hipMemset(recvbuff[i], 0, size * sizeof(float)));
-    }
-	
-	std::cout << "[INFO]: OK2." << std::endl;
+  for (int i = 0; i < nDevices; ++i) {
+    devices[i] = i;
+    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipStreamCreate(&streams[i]));
+    HIP_CHECK(hipMalloc(&sendbuff[i], size * sizeof(float)));
+    HIP_CHECK(hipMalloc(&recvbuff[i], size * sizeof(float)));
+    HIP_CHECK(hipMemset(sendbuff[i], 1, size * sizeof(float)));
+    HIP_CHECK(hipMemset(recvbuff[i], 0, size * sizeof(float)));
+  }
 
-    // Initialization of RCCL communicators
-    std::vector<ncclComm_t> comms(nDevices);
-    ncclUniqueId id;
-    RCCL_CHECK(ncclGetUniqueId(&id));
-	
-	std::cout << "[INFO]: OK3." << std::endl;
+  std::cout << "[INFO]: OK2." << std::endl;
 
-    // Parallel initialization of communicators
-    RCCL_CHECK(ncclGroupStart());
-		for (int i = 0; i < nDevices; ++i) {
-			HIP_CHECK(hipSetDevice(i));
-			RCCL_CHECK(ncclCommInitRank(&comms[i], nDevices, id, i));
-		}
-    RCCL_CHECK(ncclGroupEnd());
-	
-	std::cout << "[INFO]: OK4." << std::endl;
+  // Initialization of RCCL communicators
+  std::vector<ncclComm_t> comms(nDevices);
+  ncclUniqueId id;
+  RCCL_CHECK(ncclGetUniqueId(&id));
 
-    // Perform RCCL AllReduce operation
-    RCCL_CHECK(ncclGroupStart());
-		for (int i = 0; i < nDevices; ++i) {
-			HIP_CHECK(hipSetDevice(i));
-			RCCL_CHECK(ncclAllReduce((const void*)sendbuff[i], (void*)recvbuff[i], size,
-									 ncclFloat, ncclSum, comms[i], streams[i]));
-		}
-    RCCL_CHECK(ncclGroupEnd());
-	
-	std::cout << "[INFO]: OK5." << std::endl;
+  std::cout << "[INFO]: OK3." << std::endl;
 
+  // Parallel initialization of communicators
+  RCCL_CHECK(ncclGroupStart());
+  for (int i = 0; i < nDevices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
+    RCCL_CHECK(ncclCommInitRank(&comms[i], nDevices, id, i));
+  }
+  RCCL_CHECK(ncclGroupEnd());
 
+  std::cout << "[INFO]: OK4." << std::endl;
 
-  // Synchronisation des streams : error 
+  // Perform RCCL AllReduce operation
+  RCCL_CHECK(ncclGroupStart());
+  for (int i = 0; i < nDevices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
+    RCCL_CHECK(ncclAllReduce((const void *)sendbuff[i], (void *)recvbuff[i],
+                             size, ncclFloat, ncclSum, comms[i], streams[i]));
+  }
+  RCCL_CHECK(ncclGroupEnd());
+
+  std::cout << "[INFO]: OK5." << std::endl;
+
+  // Synchronisation des streams : error
   for (int i = 0; i < nDevices; ++i) {
     HIP_CHECK(hipSetDevice(i));
     hipError_t status = hipStreamQuery(streams[i]);
     if (status == hipSuccess) {
-        std::cout << "Stream " << i << " completed successfully." << std::endl;
+      std::cout << "Stream " << i << " completed successfully." << std::endl;
     } else if (status == hipErrorNotReady) {
-        std::cout << "Stream " << i << " is still running." << std::endl;
+      std::cout << "Stream " << i << " is still running." << std::endl;
     } else {
-        std::cerr << "Error in stream " << i << ": " << hipGetErrorString(status) << std::endl;
+      std::cerr << "Error in stream " << i << ": " << hipGetErrorString(status)
+                << std::endl;
     }
   }
 
-/*
-    // Synchronisation des streams : error 
-    for (int i = 0; i < nDevices; ++i) {
-        HIP_CHECK(hipSetDevice(i));
-        HIP_CHECK(hipStreamSynchronize(streams[i]));
-    }
-    */
-	
-	std::cout << "[INFO]: OK6." << std::endl;
+  /*
+      // Synchronisation des streams : error
+      for (int i = 0; i < nDevices; ++i) {
+          HIP_CHECK(hipSetDevice(i));
+          HIP_CHECK(hipStreamSynchronize(streams[i]));
+      }
+      */
 
-    // Vérification (sur le premier device pour simplifier)
-    HIP_CHECK(hipSetDevice(0));
-    std::vector<float> host_buffer(size);
-    HIP_CHECK(hipMemcpy(host_buffer.data(), recvbuff[0], size * sizeof(float), hipMemcpyDeviceToHost));
-	
-	std::cout << "[INFO]: OK7." << std::endl;
-    
-    bool correct = true;
-    for (int i = 0; i < size; ++i) {
-        if (host_buffer[i] != nDevices) {
-            correct = false;
-            break;
-        }
-    }
+  std::cout << "[INFO]: OK6." << std::endl;
 
-    if (correct) {
-        std::cout << "[INFO]: RCCL AllReduce completed successfully." << std::endl;
-    } else {
-        std::cout << "[ERROR]: RCCL AllReduce failed." << std::endl;
-    
-	
-	std::cout << "[INFO]: OK8." << std::endl;
+  // Vérification (sur le premier device pour simplifier)
+  HIP_CHECK(hipSetDevice(0));
+  std::vector<float> host_buffer(size);
+  HIP_CHECK(hipMemcpy(host_buffer.data(), recvbuff[0], size * sizeof(float),
+                      hipMemcpyDeviceToHost));
+
+  std::cout << "[INFO]: OK7." << std::endl;
+
+  bool correct = true;
+  for (int i = 0; i < size; ++i) {
+    if (host_buffer[i] != nDevices) {
+      correct = false;
+      break;
+    }
+  }
+
+  if (correct) {
+    std::cout << "[INFO]: RCCL AllReduce completed successfully." << std::endl;
+  } else {
+    std::cout << "[ERROR]: RCCL AllReduce failed." << std::endl;
+
+    std::cout << "[INFO]: OK8." << std::endl;
 
     // Nettoyage
     for (int i = 0; i < nDevices; ++i) {
-		//hipSetDevice(i)
-        ncclCommDestroy(comms[i]);
-        HIP_CHECK(hipFree(sendbuff[i]));
-        HIP_CHECK(hipFree(recvbuff[i]));
-        HIP_CHECK(hipStreamDestroy(streams[i]));
+      // hipSetDevice(i)
+      ncclCommDestroy(comms[i]);
+      HIP_CHECK(hipFree(sendbuff[i]));
+      HIP_CHECK(hipFree(recvbuff[i]));
+      HIP_CHECK(hipStreamDestroy(streams[i]));
     }
 
     std::cout << "[INFO]: RCCL test completed." << std::endl;
+  }
 }
-}
-
 
 int main(int argc, char *argv[]) {
 
-  //testCheckOverlap();
+  // testCheckOverlap();
 
   bool isPreheating = false;
 
@@ -2087,16 +2085,13 @@ int main(int argc, char *argv[]) {
     std::cout << "\n";
 */
 
-
-
   std::cout << "[INFO]: Methode 4\n";
   Test002(4);
   std::cout << "\n";
 
+  // testRCCL2();
 
-  //testRCCL2();
-
-  //testRCCL3();
+  // testRCCL3();
   std::cout << "[INFO]: WELL DONE :-) FINISHED !\n";
   return 0;
 }
