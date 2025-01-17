@@ -2257,6 +2257,169 @@ void testRCCL4() {
   std::cout << "[INFO]: RCCL test completed successfully." << std::endl;
 }
 
+
+void testRCCL5() {
+  std::cout << "[INFO]: RCCL test with vector fragmentation, reconstruction, and collective operations\n";
+
+  // Initialization of devices
+  int nDevices;
+  hipError_t err = hipGetDeviceCount(&nDevices);
+  if (err != hipSuccess) {
+    std::cerr << "Error getting number of devices: " << hipGetErrorString(err)
+              << std::endl;
+    exit(1);
+  }
+
+  // Creation of the initial vector
+  const int vectorSize = 1000000;
+  std::vector<float> initialVector(vectorSize);
+  for (int i = 0; i < vectorSize; ++i) {
+    initialVector[i] = static_cast<float>(i);
+  }
+  std::cout << "[INFO]: OK1." << std::endl;
+
+  // Calculation of fragment size
+  int fragmentSize = vectorSize / nDevices;
+  int lastFragmentSize = fragmentSize + (vectorSize % nDevices);
+
+  // Initialization of RCCL communicators
+  std::vector<ncclComm_t> comms(nDevices);
+  ncclUniqueId id;
+  RCCL_CHECK(ncclGetUniqueId(&id));
+  std::cout << "[INFO]: OK2." << std::endl;
+
+  // Parallel initialization of communicators
+  RCCL_CHECK(ncclGroupStart());
+  for (int i = 0; i < nDevices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
+    RCCL_CHECK(ncclCommInitRank(&comms[i], nDevices, id, i));
+  }
+  RCCL_CHECK(ncclGroupEnd());
+  std::cout << "[INFO]: OK3." << std::endl;
+
+  // Allocate and copy fragments on each GPU
+  std::vector<float *> d_fragments(nDevices);
+  std::vector<float *> d_results(nDevices);
+  for (int i = 0; i < nDevices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
+    int currentFragmentSize = (i == nDevices - 1) ? lastFragmentSize : fragmentSize;
+    HIP_CHECK(hipMalloc(&d_fragments[i], currentFragmentSize * sizeof(float)));
+    HIP_CHECK(hipMalloc(&d_results[i], currentFragmentSize * sizeof(float)));
+    HIP_CHECK(hipMemcpy(d_fragments[i], initialVector.data() + i * fragmentSize,
+                        currentFragmentSize * sizeof(float),
+                        hipMemcpyHostToDevice));
+  }
+
+  std::cout << "[INFO]: OK4." << std::endl;
+  // Synchronisation
+  for (int i = 0; i < nDevices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipDeviceSynchronize());
+  }
+  std::cout << "[INFO]: OK5." << std::endl;
+
+  // modif
+  // Point-to-point communication: Send from device 0 to device 1
+  if (nDevices > 1) {
+    RCCL_CHECK(ncclGroupStart());
+    RCCL_CHECK(ncclSend(d_fragments[0], fragmentSize, ncclFloat, 1, comms[0], nullptr));
+    RCCL_CHECK(ncclRecv(d_results[1], fragmentSize, ncclFloat, 0, comms[1], nullptr));
+    RCCL_CHECK(ncclGroupEnd());
+  }
+  std::cout << "[INFO]: OK6." << std::endl;
+
+  // Collective operations
+  RCCL_CHECK(ncclGroupStart());
+  for (int i = 0; i < nDevices; ++i) {
+    int currentFragmentSize = (i == nDevices - 1) ? lastFragmentSize : fragmentSize;
+    
+    // ReduceScatter: sum all fragments and scatter the result
+    RCCL_CHECK(ncclReduceScatter(d_fragments[i], d_results[i], currentFragmentSize,
+                                 ncclFloat, ncclSum, comms[i], nullptr));
+  }
+  RCCL_CHECK(ncclGroupEnd());
+  std::cout << "[INFO]: OK7." << std::endl;
+
+  // AllGather: gather all results on all devices
+  RCCL_CHECK(ncclGroupStart());
+  for (int i = 0; i < nDevices; ++i) {
+    int currentFragmentSize = (i == nDevices - 1) ? lastFragmentSize : fragmentSize;
+    RCCL_CHECK(ncclAllGather(d_results[i], d_fragments[i], currentFragmentSize,
+                             ncclFloat, comms[i], nullptr));
+  }
+  RCCL_CHECK(ncclGroupEnd());
+  std::cout << "[INFO]: OK8." << std::endl;
+
+  // Reduce: sum all fragments on device 0
+  float* d_sum;
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipMalloc(&d_sum, sizeof(float)));
+  RCCL_CHECK(ncclReduce(d_fragments[0], d_sum, 1, ncclFloat, ncclSum, 0, comms[0], nullptr));
+  std::cout << "[INFO]: OK9." << std::endl;
+
+  // Broadcast: send the sum from device 0 to all devices
+  RCCL_CHECK(ncclGroupStart());
+  for (int i = 0; i < nDevices; ++i) {
+    RCCL_CHECK(ncclBroadcast(d_sum, d_sum, 1, ncclFloat, 0, comms[i], nullptr));
+  }
+  RCCL_CHECK(ncclGroupEnd());
+  std::cout << "[INFO]: OK10." << std::endl;
+
+  // AllReduce: sum all fragments on all devices
+  RCCL_CHECK(ncclGroupStart());
+  for (int i = 0; i < nDevices; ++i) {
+    int currentFragmentSize = (i == nDevices - 1) ? lastFragmentSize : fragmentSize;
+    RCCL_CHECK(ncclAllReduce(d_fragments[i], d_results[i], currentFragmentSize,
+                             ncclFloat, ncclSum, comms[i], nullptr));
+  }
+  RCCL_CHECK(ncclGroupEnd());
+  std::cout << "[INFO]: OK11." << std::endl;
+
+  // Vector reconstruction
+  
+  std::vector<float> reconstructedVector(vectorSize);
+  for (int i = 0; i < nDevices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
+    int currentFragmentSize = (i == nDevices - 1) ? lastFragmentSize : fragmentSize;
+    HIP_CHECK(hipMemcpy(reconstructedVector.data() + i * fragmentSize,
+                        d_results[i], currentFragmentSize * sizeof(float),
+                        hipMemcpyDeviceToHost));
+  }
+ 
+
+  // Vector reconstruction
+
+  /*
+  std::vector<float> reconstructedVector(vectorSize);
+  size_t offset = 0;
+  for (int i = 0; i < nDevices; ++i) {
+      HIP_CHECK(hipSetDevice(i));
+      size_t currentFragmentSize = (i == nDevices - 1) ? lastFragmentSize : fragmentSize;
+      HIP_CHECK(hipMemcpy(reconstructedVector.data() + offset,
+                          d_results[i], currentFragmentSize * sizeof(float),
+                          hipMemcpyDeviceToHost));
+      offset += currentFragmentSize;
+  }
+  */
+
+  std::cout << "[INFO]: OK12." << std::endl;
+
+  // Verification
+ 
+  // Cleanup
+  for (int i = 0; i < nDevices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipFree(d_fragments[i]));
+    HIP_CHECK(hipFree(d_results[i]));
+    RCCL_CHECK(ncclCommDestroy(comms[i]));
+  }
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipFree(d_sum));
+
+  std::cout << "[INFO]: RCCL test with collective operations completed successfully." << std::endl;
+}
+
+
 int main(int argc, char *argv[]) {
 
   // testCheckOverlap();
@@ -2291,7 +2454,9 @@ int main(int argc, char *argv[]) {
   // testRCCL2();
 
   // testRCCL3();
-  testRCCL4();
+  // testRCCL4();
+
+  testRCCL5();
   std::cout << "[INFO]: WELL DONE :-) FINISHED !\n";
   return 0;
 }
