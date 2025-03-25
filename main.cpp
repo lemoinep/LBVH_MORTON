@@ -35,9 +35,9 @@
 // Link HIP
 #include "hip/hip_runtime.h"
 #include "hip/hip_runtime_api.h"
-#include "hipblas-export.h"
-#include "hipblas.h"
-#include "hipsolver.h"
+//#include "hipblas-export.h"
+//#include "hipblas.h"
+//#include "hipsolver.h"
 
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
@@ -45,9 +45,9 @@
 #include <thrust/random.h>
 #include <thrust/transform.h>
 
-#include <roctx.h> //Scan Perf
+//#include <//roctx.h> //Scan Perf
 
-#include <rccl.h> // For multi-GPU
+//#include <rccl.h> // For multi-GPU
 
 #include "lbvh.cuh"
 //#include "lbvh/bvh.cuh"
@@ -1347,11 +1347,11 @@ __global__ void rayTracingKernelExplorationOptimized2(
       }
 
       delta += (angleToTriangle > angleToTriangleLim)
-                   ? (distanceToTriangle * 0.75f + epsilon)
+                   ? (distanceToTriangle * 0.85f + epsilon)
                    : epsilon;
 
     } else {
-      delta += epsilon;
+      delta += epsilon+1.0*distanceToTriangle * 0.95f; //A fixer
     }
   }
 }
@@ -1501,8 +1501,8 @@ bool loadOBJTriangle(const std::string &filename,
 
 void Test002(int mode) {
 
-  roctxRangePush("Initialisation");
-  roctxMark("Begin");
+  //roctxRangePush("Initialisation");
+  //roctxMark("Begin");
 
   std::chrono::steady_clock::time_point t_begin_0, t_begin_1;
   std::chrono::steady_clock::time_point t_end_0, t_end_1;
@@ -1510,13 +1510,13 @@ void Test002(int mode) {
 
   std::vector<Triangle> triangles;
   // Load object
-  roctxMark("Load obj");
+  //roctxMark("Load obj");
   loadOBJTriangle("Test.obj", triangles, 1);
 
   int nbTriangle = triangles.size();
 
   // Building the LBVH
-  roctxMark("Build LBVH Begin");
+  //roctxMark("Build LBVH Begin");
   t_begin_0 = std::chrono::steady_clock::now();
   // lbvh::bvh<float, Triangle, aabb_getter> bvh(triangles.begin(),
   // triangles.end(), true);
@@ -1525,18 +1525,18 @@ void Test002(int mode) {
   bvh = lbvh::bvh<float, Triangle, aabb_getter>(triangles.begin(),
                                                 triangles.end(), true);
 
-  roctxMark("Build LBVH bvh_device");
+  //roctxMark("Build LBVH bvh_device");
   lbvh::bvh_device<float, Triangle> bvh_dev;
 
   bvh_dev = bvh.get_device_repr();
 
   // const auto bvh_dev = bvh.get_device_repr();
   t_end_0 = std::chrono::steady_clock::now();
-  roctxMark("Build LBVH End");
+  //roctxMark("Build LBVH End");
 
   // Computes the bounding box of all objects in the space to define the
   // workspace.
-  roctxMark("Global Box Begin");
+  //roctxMark("Global Box Begin");
   lbvh::aabb<float> global_aabb = thrust::reduce(
       thrust::device, bvh_dev.aabbs, bvh_dev.aabbs + bvh_dev.num_objects,
       lbvh::aabb<float>(), merge_aabb());
@@ -1551,7 +1551,7 @@ void Test002(int mode) {
   printGlobalBoxInfo(h_gBox);
   // printGlobalBoxInfoKernel<<<1, 1>>>(d_gBox);
   // hipDeviceSynchronize();
-  roctxMark("Global Box End");
+  //roctxMark("Global Box End");
 
   //
 
@@ -1658,6 +1658,7 @@ void Test002(int mode) {
   //  h_rays[0].origin = make_float4(0.8f, 0.7f, 0.7f, 1.0f);
 
   h_rays[0].origin = make_float4(0.5f, 0.5f, 0.5, 1.0f);
+  h_rays[0].origin = make_float4(-10.5f, 0.15f, 0.5, 1.0f);
 
   // h_rays[0].origin = make_float4(0.9f, 0.9f, 0.9, 1.0f);
   // h_rays[0].origin = make_float4(0.9f, 0.9f, 1.0, 1.0f);
@@ -1678,6 +1679,8 @@ void Test002(int mode) {
 
   h_rays[0].direction = make_float4(0.0f, 0.0f, -1.0f, 0.0f);
   h_rays[0].direction = make_float4(0.0f, 0.0f, 1.0f, 0.0f);
+
+   h_rays[0].direction = make_float4(1.0f, 0.0f, 0.0f, 0.0f);
 
   // h_rays[0].direction = make_float4(1.0f, 1.0f,  1.0f, 0.0f);
 
@@ -1700,7 +1703,7 @@ void Test002(int mode) {
   hipEventCreate(&stop1);
   hipEventRecord(start1);
 
-  roctxMark("Ray Tracing Begin");
+  //roctxMark("Ray Tracing Begin");
 
   t_begin_1 = std::chrono::steady_clock::now();
   int threadsPerBlock = 512;
@@ -1738,11 +1741,11 @@ void Test002(int mode) {
     float4 *h_directions;
     float4 *d_directions;
     h_directions = new float4[numDirections];
-    roctxMark("CALL Ray Tracing initializeDirections");
+    //roctxMark("CALL Ray Tracing initializeDirections");
     initializeDirections(h_directions);
     hipMalloc(&d_directions, numDirections * sizeof(float4));
     initializeDirectionsKernel<<<1, 1>>>(d_directions);
-    roctxMark("CALL Ray Tracing Kernel");
+    //roctxMark("CALL Ray Tracing Kernel");
     rayTracingKernelExplorationOptimized2<float, Triangle>
         <<<blocksPerGrid, threadsPerBlock>>>(bvh_dev, d_rays, d_hitRays,
                                              numRays, d_directions, d_gBox);
@@ -1761,13 +1764,13 @@ void Test002(int mode) {
   hipEventDestroy(start1);
   hipEventDestroy(stop1);
   t_end_1 = std::chrono::steady_clock::now();
-  roctxMark("Ray Tracing End");
+  //roctxMark("Ray Tracing End");
 
   thrust::host_vector<HitRay> h_hitRays(numRays);
   hipMemcpy(h_hitRays.data(), d_hitRays, numRays * sizeof(HitRay),
             hipMemcpyDeviceToHost);
 
-  roctxMark("Debring Begin");
+  //roctxMark("Debring Begin");
   std::cout << "\n";
   std::cout << "Debriefing\n";
   std::cout << "\n";
@@ -1813,14 +1816,14 @@ void Test002(int mode) {
   std::cout << "[INFO]: Elapsed microseconds inside Ray Tracing : "
             << milliseconds1 << " ms with hip chrono\n";
 
-  roctxMark("FreeMemory");
+  //roctxMark("FreeMemory");
   hipFree(d_rays);
   hipFree(d_hitRays);
   hipFree(d_gBox);
   h_rays.clear();
   h_hitRays.clear();
-  roctxMark("End");
-  roctxRangePop();
+  //roctxMark("End");
+  //roctxRangePop();
 }
 
 __global__ void onKernelNothing(float4 *nothing) {
@@ -1905,14 +1908,14 @@ void testCheckOverlap() {
 }
 
 void testRCCL() {
-  ncclComm_t comm;
-  ncclUniqueId id;
-  ncclGetUniqueId(&id);
-  ncclCommInitRank(&comm, 1, id, 0);
+  //ncclComm_t comm;
+  //ncclUniqueId id;
+  //ncclGetUniqueId(&id);
+  //ncclCommInitRank(&comm, 1, id, 0);
   //...
   // To do: multi-gpu ray tracing with RCCL for LBVH
   //...
-  ncclCommDestroy(comm);
+  //ncclCommDestroy(comm);
 }
 
 int main(int argc, char *argv[]) {
@@ -1931,11 +1934,11 @@ int main(int argc, char *argv[]) {
     runScanPreheatingGPU();
   std::cout << "\n";
 
-  /*
+  
     std::cout << "[INFO]: Methode 3\n";
     Test002(3);
     std::cout << "\n";
-  */
+  
 
   /*
     std::cout << "[INFO]: Methode 2 again\n";

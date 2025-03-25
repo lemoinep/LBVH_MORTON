@@ -29,13 +29,13 @@ endif()
 MESSAGE("{COMPILE_WITH_HIP}")
 
 include_directories(${HIP_PATH}/include)
-include_directories(/opt/rocm-5.7.2/hip/include)
-include_directories(/opt/rocm-5.7.2/hipblas/include)
-include_directories(/opt/rocm-5.7.2/hipblas/lib)
+include_directories(/opt/rocm-6.3.2/hip/include)
+include_directories(/opt/rocm-6.3.2/hipblas/include)
+include_directories(/opt/rocm-6.3.2/hipblas/lib)
 #include_directories(/nvme0/lemoinep/soft/rocThrust/include)
-include_directories(/opt/rocm-5.7.2/roctracer/include)
+include_directories(/opt/rocm-6.3.2/roctracer/include)
 
-list(APPEND CMAKE_PREFIX_PATH /opt/rocm-5.7.2 /opt/rocm-5.7.2)
+list(APPEND CMAKE_PREFIX_PATH /opt/rocm-6.3.2 /opt/rocm-6.3.2)
 
 # Set the GPU to compile for
 #set(GPU_TARGETS "gfx900:gfx906:gfx1032;gfx1035" CACHE STRING "GPU targets to compile for")
@@ -55,7 +55,7 @@ set(CMAKE_${GPU_RUNTIME}_STANDARD 17)
 set(CMAKE_${GPU_RUNTIME}_EXTENSIONS OFF)
 set(CMAKE_${GPU_RUNTIME}_STANDARD_REQUIRED ON)
 
-set(ROCM_ROOT "/opt/rocm-5.7.2" CACHE PATH "Root directory of the ROCm installation")
+set(ROCM_ROOT "/opt/rocm-6.3.2" CACHE PATH "Root directory of the ROCm installation")
 list(APPEND CMAKE_PREFIX_PATH "${ROCM_ROOT}")
 
 
@@ -150,7 +150,7 @@ target_link_libraries(main
         roc::rocthrust
         roc::rccl
     PRIVATE hipblas
-    PRIVATE /opt/rocm-5.7.2/lib/libroctx64.so
+    PRIVATE /opt/rocm-6.3.2/lib/libroctx64.so
 )
 
 
