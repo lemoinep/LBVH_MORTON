@@ -1351,10 +1351,198 @@ __global__ void rayTracingKernelExplorationOptimized2(
                    : epsilon;
 
     } else {
-      delta += epsilon+1.0*distanceToTriangle * 0.95f; //A fixer
+      delta += epsilon+1.0*distanceToTriangle * 0.85f; //A fixer
     }
   }
 }
+
+
+template <typename T, typename U>
+__global__ void rayTracingKernelExplorationOptimized5a(
+    lbvh::bvh_device<T, U> bvh_dev, Ray *rays, HitRay *d_HitRays, int numRays,
+    float4 *directions, const CenterGlobalSpaceBox *d_gBox) {
+  
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= numRays)
+    return;
+
+  Ray ray = rays[idx];
+  HitRay &hitRay = d_HitRays[idx];
+
+  hitRay.hitResults = -1;
+  hitRay.distanceResults = INFINITY;
+  hitRay.intersectionPoint = make_float3(INFINITY, INFINITY, INFINITY);
+  hitRay.idResults = -1;
+
+  constexpr float epsilon = 0.001f;
+  constexpr int maxIterations = 50;
+  constexpr float epsilonC = 0.01f;
+  constexpr float angleToTriangleLim = 0.2f;
+
+  float t; 
+  for (int i = 0; i < 14; ++i) {
+    float4 currentPosition = ray.origin + directions[i] * epsilonC;
+    auto nearestTriangleIndex = lbvh::query_device(
+        bvh_dev, lbvh::nearest(currentPosition), distance_calculator());
+
+    if (nearestTriangleIndex.first != 0xFFFFFFFF) {
+      const Triangle &hitTriangle = bvh_dev.objects[nearestTriangleIndex.first];
+      if (pointInTriangle2(currentPosition, hitTriangle, epsilonC)) {
+        if (rayTriangleIntersect(ray, hitTriangle, t)) {
+          updateHitResults(hitRay, nearestTriangleIndex.first, t, ray,
+                           hitTriangle);
+          return;
+        }
+      }
+    }
+  }
+
+  float delta = epsilon;
+  float4 currentPosition = ray.origin;
+  
+  float distanceSphereScene = INFINITY;
+  float4 intersectionPointWithSphereScene;
+
+  bool isSceneIntersection = raySphereIntersection(
+      ray.origin, ray.direction, d_gBox->position, d_gBox->radius,
+      intersectionPointWithSphereScene, distanceSphereScene);
+
+  if (!isSceneIntersection)
+    return; 
+
+  float rfar = fmaxf(2.0f * length(ray.origin - d_gBox->position), d_gBox->radius * 2.0f);
+
+  for (int iteration = 0; iteration < maxIterations; ++iteration) {
+    currentPosition += ray.direction * delta;
+
+    if (delta > rfar)
+      return; 
+
+    auto nearestTriangleIndex = lbvh::query_device(
+        bvh_dev, lbvh::nearest(currentPosition), distance_calculator());
+    
+    if (nearestTriangleIndex.first != 0xFFFFFFFF) {
+      const Triangle &hitTriangle = bvh_dev.objects[nearestTriangleIndex.first];
+
+      float4 positionToTriangle =
+          (hitTriangle.v1 + hitTriangle.v2 + hitTriangle.v3) / 3.0f;
+      float4 directionToTriangle = positionToTriangle - currentPosition;
+
+      float distanceToTriangle = length(directionToTriangle);
+      float angleToTriangle =
+          fabs(angleScalar(directionToTriangle, ray.direction));
+      
+      if (rayTriangleIntersect(ray, hitTriangle, t)) {
+        updateHitResults(hitRay, nearestTriangleIndex.first, t, ray,
+                         hitTriangle);
+        return;
+      }
+
+      delta += (angleToTriangle > angleToTriangleLim)
+                   ? distanceToTriangle * 0.85f + epsilon
+                   : epsilon;
+    } else {
+      delta += epsilon; 
+    }
+  }
+}
+
+
+template <typename T, typename U>
+__global__ void rayTracingKernelExplorationOptimized5(
+    lbvh::bvh_device<T, U> bvh_dev, Ray *rays, HitRay *d_HitRays, int numRays,
+    float4 *directions, const CenterGlobalSpaceBox *d_gBox) {
+
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= numRays)
+    return;
+
+
+  Ray ray = rays[idx];
+  HitRay &hitRay = d_HitRays[idx];
+
+  hitRay.hitResults = -1;
+  hitRay.distanceResults = INFINITY;
+  hitRay.intersectionPoint = make_float3(INFINITY, INFINITY, INFINITY);
+  hitRay.idResults = -1;
+
+  constexpr float epsilon = 0.001f;
+  constexpr int maxIterations = 50;
+  constexpr float epsilonC = 0.01f;
+  constexpr float angleToTriangleLim = 0.2f;
+
+
+  float t; 
+  for (int i = 0; i < 14; ++i) {
+    float4 currentPosition = ray.origin + directions[i] * epsilonC;
+
+    auto nearestTriangleIndex = lbvh::query_device(
+        bvh_dev, lbvh::nearest(currentPosition), distance_calculator());
+
+    if (nearestTriangleIndex.first != 0xFFFFFFFF) {
+      const Triangle &hitTriangle = bvh_dev.objects[nearestTriangleIndex.first];
+      if (pointInTriangle2(currentPosition, hitTriangle, epsilonC) &&
+          rayTriangleIntersect(ray, hitTriangle, t)) {
+        updateHitResults(hitRay, nearestTriangleIndex.first, t, ray,
+                         hitTriangle);
+        return;
+      }
+    }
+  }
+
+  float delta = epsilon;
+  float4 currentPosition = ray.origin;
+
+  float distanceSphereScene = INFINITY;
+  float4 intersectionPointWithSphereScene;
+
+  bool isSceneIntersection = raySphereIntersection(
+      ray.origin, ray.direction, d_gBox->position, d_gBox->radius,
+      intersectionPointWithSphereScene, distanceSphereScene);
+
+  if (!isSceneIntersection)
+    return;
+
+
+  float rfar = fmaxf(2.0f * length(ray.origin - d_gBox->position), d_gBox->radius * 2.0f);
+
+  for (int iteration = 0; iteration < maxIterations; ++iteration) {
+    currentPosition += ray.direction * delta;
+
+    if (delta > rfar)
+      return;
+
+    auto nearestTriangleIndex = lbvh::query_device(
+        bvh_dev, lbvh::nearest(currentPosition), distance_calculator());
+
+    if (nearestTriangleIndex.first != 0xFFFFFFFF) {
+      const Triangle &hitTriangle = bvh_dev.objects[nearestTriangleIndex.first];
+
+      float4 positionToTriangle =
+          (hitTriangle.v1 + hitTriangle.v2 + hitTriangle.v3) / 3.0f;
+      float4 directionToTriangle = positionToTriangle - currentPosition;
+
+      float distanceToTriangle = length(directionToTriangle);
+      float angleToTriangle =
+          fabs(angleScalar(directionToTriangle, ray.direction));
+
+      if (rayTriangleIntersect(ray, hitTriangle, t)) {
+        updateHitResults(hitRay, nearestTriangleIndex.first, t, ray,
+                         hitTriangle);
+        return;
+      }
+
+      delta += (angleToTriangle > angleToTriangleLim)
+                   ? distanceToTriangle * 0.85f + epsilon
+                   : epsilon;
+    } else {
+      delta += epsilon; 
+    }
+  }
+}
+
+
+
 
 //--------------------------------------------------------------------------------------------------------------
 //**************************************************************************************************************
@@ -1660,6 +1848,13 @@ void Test002(int mode) {
   h_rays[0].origin = make_float4(0.5f, 0.5f, 0.5, 1.0f);
   h_rays[0].origin = make_float4(-10.5f, 0.15f, 0.5, 1.0f);
 
+
+  h_rays[0].origin = make_float4(-100.0f, 0.15f, 0.5, 1.0f);
+ 
+  //int k = rand() % 1
+  
+
+
   // h_rays[0].origin = make_float4(0.9f, 0.9f, 0.9, 1.0f);
   // h_rays[0].origin = make_float4(0.9f, 0.9f, 1.0, 1.0f);
 
@@ -1750,6 +1945,23 @@ void Test002(int mode) {
         <<<blocksPerGrid, threadsPerBlock>>>(bvh_dev, d_rays, d_hitRays,
                                              numRays, d_directions, d_gBox);
 
+    hipFree(d_directions);
+    delete[] h_directions;
+  }
+
+   if (mode == 5) {
+    const int numDirections = 14;
+    float4 *h_directions;
+    float4 *d_directions;
+    h_directions = new float4[numDirections];
+    //roctxMark("CALL Ray Tracing initializeDirections");
+    initializeDirections(h_directions);
+    hipMalloc(&d_directions, numDirections * sizeof(float4));
+    initializeDirectionsKernel<<<1, 1>>>(d_directions);
+    //roctxMark("CALL Ray Tracing Kernel");
+    rayTracingKernelExplorationOptimized5<float, Triangle>
+        <<<blocksPerGrid, threadsPerBlock>>>(bvh_dev, d_rays, d_hitRays,
+                                             numRays, d_directions, d_gBox);
     hipFree(d_directions);
     delete[] h_directions;
   }
@@ -1948,6 +2160,11 @@ int main(int argc, char *argv[]) {
 
   std::cout << "[INFO]: Methode 4\n";
   Test002(4);
+  std::cout << "\n";
+
+
+  std::cout << "[INFO]: Methode 5\n";
+  Test002(5);
   std::cout << "\n";
 
   std::cout << "[INFO]: WELL DONE :-) FINISHED !\n";
