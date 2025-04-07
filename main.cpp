@@ -1357,96 +1357,6 @@ __global__ void rayTracingKernelExplorationOptimized2(
 }
 
 
-template <typename T, typename U>
-__global__ void rayTracingKernelExplorationOptimized5a(
-    lbvh::bvh_device<T, U> bvh_dev, Ray *rays, HitRay *d_HitRays, int numRays,
-    float4 *directions, const CenterGlobalSpaceBox *d_gBox) {
-  
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= numRays)
-    return;
-
-  Ray ray = rays[idx];
-  HitRay &hitRay = d_HitRays[idx];
-
-  hitRay.hitResults = -1;
-  hitRay.distanceResults = INFINITY;
-  hitRay.intersectionPoint = make_float3(INFINITY, INFINITY, INFINITY);
-  hitRay.idResults = -1;
-
-  constexpr float epsilon = 0.001f;
-  constexpr int maxIterations = 50;
-  constexpr float epsilonC = 0.01f;
-  constexpr float angleToTriangleLim = 0.2f;
-
-  float t; 
-  for (int i = 0; i < 14; ++i) {
-    float4 currentPosition = ray.origin + directions[i] * epsilonC;
-    auto nearestTriangleIndex = lbvh::query_device(
-        bvh_dev, lbvh::nearest(currentPosition), distance_calculator());
-
-    if (nearestTriangleIndex.first != 0xFFFFFFFF) {
-      const Triangle &hitTriangle = bvh_dev.objects[nearestTriangleIndex.first];
-      if (pointInTriangle2(currentPosition, hitTriangle, epsilonC)) {
-        if (rayTriangleIntersect(ray, hitTriangle, t)) {
-          updateHitResults(hitRay, nearestTriangleIndex.first, t, ray,
-                           hitTriangle);
-          return;
-        }
-      }
-    }
-  }
-
-  float delta = epsilon;
-  float4 currentPosition = ray.origin;
-  
-  float distanceSphereScene = INFINITY;
-  float4 intersectionPointWithSphereScene;
-
-  bool isSceneIntersection = raySphereIntersection(
-      ray.origin, ray.direction, d_gBox->position, d_gBox->radius,
-      intersectionPointWithSphereScene, distanceSphereScene);
-
-  if (!isSceneIntersection)
-    return; 
-
-  float rfar = fmaxf(2.0f * length(ray.origin - d_gBox->position), d_gBox->radius * 2.0f);
-
-  for (int iteration = 0; iteration < maxIterations; ++iteration) {
-    currentPosition += ray.direction * delta;
-
-    if (delta > rfar)
-      return; 
-
-    auto nearestTriangleIndex = lbvh::query_device(
-        bvh_dev, lbvh::nearest(currentPosition), distance_calculator());
-    
-    if (nearestTriangleIndex.first != 0xFFFFFFFF) {
-      const Triangle &hitTriangle = bvh_dev.objects[nearestTriangleIndex.first];
-
-      float4 positionToTriangle =
-          (hitTriangle.v1 + hitTriangle.v2 + hitTriangle.v3) / 3.0f;
-      float4 directionToTriangle = positionToTriangle - currentPosition;
-
-      float distanceToTriangle = length(directionToTriangle);
-      float angleToTriangle =
-          fabs(angleScalar(directionToTriangle, ray.direction));
-      
-      if (rayTriangleIntersect(ray, hitTriangle, t)) {
-        updateHitResults(hitRay, nearestTriangleIndex.first, t, ray,
-                         hitTriangle);
-        return;
-      }
-
-      delta += (angleToTriangle > angleToTriangleLim)
-                   ? distanceToTriangle * 0.85f + epsilon
-                   : epsilon;
-    } else {
-      delta += epsilon; 
-    }
-  }
-}
-
 
 template <typename T, typename U>
 __global__ void rayTracingKernelExplorationOptimized5(
@@ -1470,6 +1380,7 @@ __global__ void rayTracingKernelExplorationOptimized5(
   constexpr int maxIterations = 50;
   constexpr float epsilonC = 0.01f;
   constexpr float angleToTriangleLim = 0.2f;
+  constexpr float c1s3 = 1.0f / 3.0f;
 
 
   float t; 
@@ -1505,6 +1416,7 @@ __global__ void rayTracingKernelExplorationOptimized5(
 
 
   float rfar = fmaxf(2.0f * length(ray.origin - d_gBox->position), d_gBox->radius * 2.0f);
+  float distanceToTriangle = epsilon;
 
   for (int iteration = 0; iteration < maxIterations; ++iteration) {
     currentPosition += ray.direction * delta;
@@ -1519,7 +1431,7 @@ __global__ void rayTracingKernelExplorationOptimized5(
       const Triangle &hitTriangle = bvh_dev.objects[nearestTriangleIndex.first];
 
       float4 positionToTriangle =
-          (hitTriangle.v1 + hitTriangle.v2 + hitTriangle.v3) / 3.0f;
+          (hitTriangle.v1 + hitTriangle.v2 + hitTriangle.v3) * c1s3;
       float4 directionToTriangle = positionToTriangle - currentPosition;
 
       float distanceToTriangle = length(directionToTriangle);
@@ -1536,7 +1448,7 @@ __global__ void rayTracingKernelExplorationOptimized5(
                    ? distanceToTriangle * 0.85f + epsilon
                    : epsilon;
     } else {
-      delta += epsilon; 
+      delta += epsilon;
     }
   }
 }
@@ -2129,6 +2041,7 @@ void testRCCL() {
   //...
   //ncclCommDestroy(comm);
 }
+
 
 int main(int argc, char *argv[]) {
 
